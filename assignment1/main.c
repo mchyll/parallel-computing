@@ -8,15 +8,15 @@
 uchar* modifyImage(uchar* image);
 
 int main() {
-	uchar *image = calloc(XSIZE * YSIZE * 3, 1); // Three uchars per pixel (RGB)
-	readbmp("before.bmp", image);
+    uchar *image = calloc(XSIZE * YSIZE * 3, 1); // Three uchars per pixel (RGB)
+    readbmp("before.bmp", image);
 
-	uchar* modifiedImage = modifyImage(image);
+    uchar* modifiedImage = modifyImage(image);
 
-	savebmp("after.bmp", modifiedImage, XSIZE * 2, YSIZE * 2);
-	free(image);
+    savebmp("after.bmp", modifiedImage, XSIZE * 2, YSIZE * 2);
+    free(image);
     free(modifiedImage);
-	return 0;
+    return 0;
 }
 
 uchar* modifyImage(uchar* image) {
