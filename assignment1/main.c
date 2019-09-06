@@ -8,17 +8,26 @@
 uchar* modifyImage(uchar* image);
 
 int main() {
+    // Allocate memory for the image data
     uchar *image = calloc(XSIZE * YSIZE * 3, 1); // Three uchars per pixel (RGB)
     readbmp("before.bmp", image);
 
+    // Modify the image, returns a new pointer to the modified image data
     uchar* modifiedImage = modifyImage(image);
 
+    // Save the modified image
     savebmp("after.bmp", modifiedImage, XSIZE * 2, YSIZE * 2);
+
+    // Free the allocated memory
     free(image);
     free(modifiedImage);
+
     return 0;
 }
 
+/**
+ * Modifies an image by doubling the resolution and swapping color channels
+ */
 uchar* modifyImage(uchar* image) {
     uchar* modifiedImage = calloc(4 * XSIZE * YSIZE * 3, 1); // Modified image is double the size
 
