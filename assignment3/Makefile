@@ -6,6 +6,7 @@
 
 SRC := $(wildcard *.c)
 SRC += $(wildcard libs/*.c)
+SRC := $(filter-out serial_main.c, $(SRC))
 OBJ := $(patsubst %.c,%.o,$(SRC))
 
 CC := mpicc
@@ -21,6 +22,14 @@ endif
 main: $(OBJ)
 	$(CC) $(FLAGS) $^ -o $@
 
+serial: serial_main.c libs/bitmap.c
+	gcc $(FLAGS) $^ -o $@
+
+run: main
+	mpirun main img/before.bmp aftermath.bmp
+
+runserial: serial
+	./serial img/before.bmp seriaftermath.bmp
 
 $(OBJ) : %.o : %.c
 	$(CC) $(FLAGS) -c $< -o $@

@@ -3,6 +3,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <stdlib.h>
+#include <mpi.h>
 #include "libs/bitmap.h"
 
 // Convolutional Kernel Examples, each with dimension 3,
@@ -50,7 +51,6 @@ float const gaussianKernelFactor = (float) 1.0 / 256.0;
 
 
 // Helper function to swap bmpImageChannel pointers
-
 void swapImageChannel(bmpImageChannel **one, bmpImageChannel **two) {
   bmpImageChannel *helper = *two;
   *two = *one;
@@ -105,6 +105,18 @@ void help(char const *exec, char const opt, char const *optarg) {
 }
 
 int main(int argc, char **argv) {
+    // Set up MPI
+    MPI_Init(NULL, NULL);
+
+    // Find the rank of this process and the number of processes
+    int rank;
+    int numProcesses;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
+
+    printf("MPI is set up. My rank: %d, number of processes: %d\n", rank, numProcesses);
+
+
   /*
     Parameter parsing, don't change this!
    */
@@ -158,76 +170,152 @@ int main(int argc, char **argv) {
     End of Parameter parsing!
    */
 
-  /*
-    Create the BMP image and load it from disk.
-   */
-  bmpImage *image = newBmpImage(0,0);
-  if (image == NULL) {
-    fprintf(stderr, "Could not allocate new image!\n");
-  }
-
-  if (loadBmpImage(image, input) != 0) {
-    fprintf(stderr, "Could not load bmp image '%s'!\n", input);
-    freeBmpImage(image);
-    goto error_exit;
-  }
 
 
-  // Create a single color channel image. It is easier to work just with one color
-  bmpImageChannel *imageChannel = newBmpImageChannel(image->width, image->height);
-  if (imageChannel == NULL) {
-    fprintf(stderr, "Could not allocate new image channel!\n");
-    freeBmpImage(image);
-    goto error_exit;
+
+
+
+
+
+
+  // Full image, only exists on main rank
+  bmpImage *image;
+  // Full grayscale image, only on main rank
+  bmpImageChannel *imageChannel;
+
+  // Number of rows in a chunk
+  int chunkHeight;
+  // Number of rows in the main proc's chunk (has any non-divisible rows as well)
+  int chunkHeightMaster;
+
+  // The local image chunk each rank will work on
+  bmpImageChannel* localChunk;
+
+  // Main process reads the image from disk
+  if (rank == 0) {
+    /*
+        Create the BMP image and load it from disk.
+    */
+    image = newBmpImage(0,0);
+    if (image == NULL) {
+        fprintf(stderr, "Could not allocate new image!\n");
+    }
+
+    if (loadBmpImage(image, input) != 0) {
+        fprintf(stderr, "Could not load bmp image '%s'!\n", input);
+        freeBmpImage(image);
+        goto error_exit;
+    }
+
+
+    // Create a single color channel image. It is easier to work just with one color
+    imageChannel = newBmpImageChannel(image->width, image->height);
+    if (imageChannel == NULL) {
+        fprintf(stderr, "Could not allocate new image channel!\n");
+        freeBmpImage(image);
+        goto error_exit;
+    }
+
+    // Extract from the loaded image an average over all colors - nothing else than
+    // a black and white representation
+    // extractImageChannel and mapImageChannel need the images to be in the exact
+    // same dimensions!
+    // Other prepared extraction functions are extractRed, extractGreen, extractBlue
+    if(extractImageChannel(imageChannel, image, extractAverage) != 0) {
+      fprintf(stderr, "Could not extract image channel!\n");
+      freeBmpImage(image);
+      freeBmpImageChannel(imageChannel);
+      goto error_exit;
+    }
+
+
+
+    chunkHeight = imageChannel->height / numProcesses;
+    chunkHeightMaster = chunkHeight + (imageChannel->height % numProcesses);
+
+    int dataPerChunk = chunkHeight * imageChannel->width;
+    int dataOffset = chunkHeightMaster * imageChannel->width;
+    int rankDim[] = { imageChannel->width, chunkHeight };
+
+    for (int i = 1; i < numProcesses; ++i) {
+      // Send the chunk dimensions
+      MPI_Send(&rankDim, 2, MPI_INT, i, 0, MPI_COMM_WORLD);
+      // Send the actual chunk data
+      MPI_Send(imageChannel->rawdata + dataOffset, dataPerChunk, MPI_UNSIGNED_CHAR, i, 1, MPI_COMM_WORLD);
+      dataOffset += dataPerChunk;
+    }
+    printf("Main boi sent %d data, image contains %d in total\n", dataOffset, imageChannel->width*imageChannel->height);
+
+    localChunk = newBmpImageChannel(imageChannel->width, chunkHeightMaster);
+    memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * chunkHeightMaster);
+    printf("Main boi must process %d amounts of data\n\n", localChunk->height*localChunk->width);
+  }
+  else {
+    // The workers
+    int dim[2];
+    MPI_Recv(&dim, 2, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    localChunk = newBmpImageChannel(dim[0], dim[1]);
+
+    MPI_Recv(localChunk->rawdata, dim[0] * dim[1], MPI_UNSIGNED_CHAR, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    printf("Fuck yea rank %d got the data motherfucker\n", rank);
+    printf("Like %d amounts of it\n\n", dim[0] * dim[1]);
   }
 
-  // Extract from the loaded image an average over all colors - nothing else than
-  // a black and white representation
-  // extractImageChannel and mapImageChannel need the images to be in the exact
-  // same dimensions!
-  // Other prepared extraction functions are extractRed, extractGreen, extractBlue
-  if(extractImageChannel(imageChannel, image, extractAverage) != 0) {
-    fprintf(stderr, "Could not extract image channel!\n");
-    freeBmpImage(image);
-    freeBmpImageChannel(imageChannel);
-    goto error_exit;
-  }
 
 
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
-  bmpImageChannel *processImageChannel = newBmpImageChannel(imageChannel->width, imageChannel->height);
-  for (unsigned int i = 0; i < iterations; i ++) {
-    applyKernel(processImageChannel->data,
-                imageChannel->data,
-                imageChannel->width,
-                imageChannel->height,
-                (int *)laplacian1Kernel, 3, laplacian1KernelFactor
- //               (int *)laplacian2Kernel, 3, laplacian2KernelFactor
- //               (int *)laplacian3Kernel, 3, laplacian3KernelFactor
- //               (int *)gaussianKernel, 5, gaussianKernelFactor
-                );
-    swapImageChannel(&processImageChannel, &imageChannel);
-  }
-  freeBmpImageChannel(processImageChannel);
+  bmpImageChannel *localChunkOut = newBmpImageChannel(localChunk->width, localChunk->height);
+  applyKernel(localChunkOut->data,
+              localChunk->data,
+              localChunk->width,
+              localChunk->height,
+              (int *)laplacian1Kernel, 3, laplacian1KernelFactor
+              // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
+              // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
+              // (int *)gaussianKernel, 5, gaussianKernelFactor
+              );
+  swapImageChannel(&localChunkOut, &localChunk);
+  freeBmpImageChannel(localChunkOut);
 
-  // Map our single color image back to a normal BMP image with 3 color channels
-  // mapEqual puts the color value on all three channels the same way
-  // other mapping functions are mapRed, mapGreen, mapBlue
-  if (mapImageChannel(image, imageChannel, mapEqual) != 0) {
-    fprintf(stderr, "Could not map image channel!\n");
-    freeBmpImage(image);
+
+
+  // Main process saves the image to disk
+  if (rank == 0) {
+    int dataPerChunk = imageChannel->width * chunkHeight;
+    int dataOffset = imageChannel->width * chunkHeightMaster;
+    for (int i = 1; i < numProcesses; ++i) {
+      // Receive the processed chunk data
+      MPI_Recv(imageChannel->rawdata + dataOffset, dataPerChunk, MPI_UNSIGNED_CHAR, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      dataOffset += dataPerChunk;
+    }
+    printf("Main boi got like all the data mang\n");
+    memcpy(imageChannel->rawdata, localChunk->rawdata, imageChannel->width * chunkHeightMaster);
+
+
+    // Map our single color image back to a normal BMP image with 3 color channels
+    // mapEqual puts the color value on all three channels the same way
+    // other mapping functions are mapRed, mapGreen, mapBlue
+    if (mapImageChannel(image, imageChannel, mapEqual) != 0) {
+      fprintf(stderr, "Could not map image channel!\n");
+      freeBmpImage(image);
+      freeBmpImageChannel(imageChannel);
+      goto error_exit;
+    }
     freeBmpImageChannel(imageChannel);
-    goto error_exit;
-  }
-  freeBmpImageChannel(imageChannel);
 
-  //Write the image back to disk
-  if (saveBmpImage(image, output) != 0) {
-    fprintf(stderr, "Could not save output to '%s'!\n", output);
-    freeBmpImage(image);
-    goto error_exit;
-  };
+    //Write the image back to disk
+    if (saveBmpImage(image, output) != 0) {
+      fprintf(stderr, "Could not save output to '%s'!\n", output);
+      freeBmpImage(image);
+      goto error_exit;
+    };
+  }
+  else {
+    // Send the processed chunk data
+    MPI_Send(localChunk->rawdata, localChunk->width * localChunk->height, MPI_UNSIGNED_CHAR, 0, 2, MPI_COMM_WORLD);
+    printf("Fuck yea rank %d RETURNED the mfkin data motherfucker\n", rank);
+  }
 
 graceful_exit:
   ret = 0;
@@ -236,5 +324,9 @@ error_exit:
     free(input);
   if (output)
     free(output);
-  return ret;
+
+
+
+    MPI_Finalize();
+    return ret;
 };
