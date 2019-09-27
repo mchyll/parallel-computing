@@ -3,6 +3,7 @@
 #include <string.h>
 #include <getopt.h>
 #include <stdlib.h>
+#include <time.h>
 #include "libs/bitmap.h"
 
 // Convolutional Kernel Examples, each with dimension 3,
@@ -194,6 +195,9 @@ int main(int argc, char **argv) {
   }
 
 
+
+  clock_t time_start = clock();
+
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
   bmpImageChannel *processImageChannel = newBmpImageChannel(imageChannel->width, imageChannel->height);
@@ -210,6 +214,11 @@ int main(int argc, char **argv) {
     swapImageChannel(&processImageChannel, &imageChannel);
   }
   freeBmpImageChannel(processImageChannel);
+
+  double elapsed = (double) (clock() - time_start) / CLOCKS_PER_SEC;
+  printf("TIME USED: %f\n\n", elapsed);
+
+
 
   // Map our single color image back to a normal BMP image with 3 color channels
   // mapEqual puts the color value on all three channels the same way

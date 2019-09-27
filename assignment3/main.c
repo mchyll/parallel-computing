@@ -4,6 +4,7 @@
 #include <getopt.h>
 #include <stdlib.h>
 #include <mpi.h>
+#include <time.h>
 #include "libs/bitmap.h"
 
 // Convolutional Kernel Examples, each with dimension 3,
@@ -58,10 +59,13 @@ void swapImageChannel(bmpImageChannel **one, bmpImageChannel **two) {
 }
 
 // Apply convolutional kernel on image data
-void applyKernel(unsigned char **out, unsigned char **in, unsigned int width, unsigned int height, int *kernel, unsigned int kernelDim, float kernelFactor) {
+void applyKernel(unsigned char **out, unsigned char **in,
+                 unsigned int width, unsigned int height,
+                 unsigned int startX, unsigned int startY,
+                 int *kernel, unsigned int kernelDim, float kernelFactor) {
   unsigned int const kernelCenter = (kernelDim / 2);
-  for (unsigned int y = 0; y < height; y++) {
-    for (unsigned int x = 0; x < width; x++) {
+  for (unsigned int y = startY; y < height; y++) {
+    for (unsigned int x = startX; x < width; x++) {
       int aggregate = 0;
       for (unsigned int ky = 0; ky < kernelDim; ky++) {
         int nky = kernelDim - 1 - ky;
@@ -183,13 +187,17 @@ int main(int argc, char **argv) {
   // Full grayscale image, only on main rank
   bmpImageChannel *imageChannel;
 
-  // Number of rows in a chunk
+  // Number of rows in a chunk *excluding* borders
   int chunkHeight;
-  // Number of rows in the main proc's chunk (has any non-divisible rows as well)
+  // Number of rows in the main proc's chunk (has any non-divisible rows as well) *excluding* borders
   int chunkHeightMaster;
 
   // The local image chunk each rank will work on
   bmpImageChannel* localChunk;
+  int topBorder = 0;
+  int bottomBorder = 0;
+
+  clock_t time_start;
 
   // Main process reads the image from disk
   if (rank == 0) {
@@ -228,40 +236,52 @@ int main(int argc, char **argv) {
       goto error_exit;
     }
 
+    printf("Image width: %d, height: %d, data: %d\n", imageChannel->width, imageChannel->height, imageChannel->width*imageChannel->height);
 
+
+
+    time_start = clock();
 
     chunkHeight = imageChannel->height / numProcesses;
     chunkHeightMaster = chunkHeight + (imageChannel->height % numProcesses);
 
-    int dataPerChunk = chunkHeight * imageChannel->width;
-    int dataOffset = chunkHeightMaster * imageChannel->width;
-    int rankDim[] = { imageChannel->width, chunkHeight };
+    int dataOffset = (chunkHeightMaster - 0) * imageChannel->width;
+    int chunkData = imageChannel->width * chunkHeight;
 
     for (int i = 1; i < numProcesses; ++i) {
-      // Send the chunk dimensions
-      MPI_Send(&rankDim, 2, MPI_INT, i, 0, MPI_COMM_WORLD);
-      // Send the actual chunk data
-      MPI_Send(imageChannel->rawdata + dataOffset, dataPerChunk, MPI_UNSIGNED_CHAR, i, 1, MPI_COMM_WORLD);
-      dataOffset += dataPerChunk;
-    }
-    printf("Main boi sent %d data, image contains %d in total\n", dataOffset, imageChannel->width*imageChannel->height);
+      int bottom = 1;
+      int top = i != (numProcesses - 1);
+      int h = chunkHeight + top + bottom;
+      int meta[] = { imageChannel->width, h, top, bottom };
 
-    localChunk = newBmpImageChannel(imageChannel->width, chunkHeightMaster);
-    memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * chunkHeightMaster);
-    printf("Main boi must process %d amounts of data\n\n", localChunk->height*localChunk->width);
+      // Send the chunk dimensions
+      MPI_Send(&meta, 4, MPI_INT, i, 0, MPI_COMM_WORLD);
+      // Send the actual chunk data
+      MPI_Send(imageChannel->rawdata + dataOffset, imageChannel->width * h, MPI_UNSIGNED_CHAR, i, 1, MPI_COMM_WORLD);
+      dataOffset += chunkData;
+    }
+    printf("Main sent %d data\n", dataOffset);
+
+    localChunk = newBmpImageChannel(imageChannel->width, chunkHeightMaster + 1);
+    memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * (chunkHeightMaster + 1));
+    printf("Main must process %d data\n\n", localChunk->height*localChunk->width);
+    topBorder = 1;
   }
   else {
     // The workers
-    int dim[2];
-    MPI_Recv(&dim, 2, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    localChunk = newBmpImageChannel(dim[0], dim[1]);
+    int meta[4];
+    MPI_Recv(&meta, 4, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    localChunk = newBmpImageChannel(meta[0], meta[1]);
+    topBorder = meta[2];
+    bottomBorder = meta[3];
 
-    MPI_Recv(localChunk->rawdata, dim[0] * dim[1], MPI_UNSIGNED_CHAR, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    printf("Fuck yea rank %d got the data motherfucker\n", rank);
-    printf("Like %d amounts of it\n\n", dim[0] * dim[1]);
+    MPI_Recv(localChunk->rawdata, meta[0] * meta[1], MPI_UNSIGNED_CHAR, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    printf("Rank %d got %d data and meta (%d %d %d %d)\n", rank, meta[0] * meta[1], meta[0], meta[1], meta[2], meta[3]);
   }
 
 
+
+  printf("Rank %d topborder: %d, bottomborder: %d\n", rank, topBorder, bottomBorder);
 
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
@@ -269,7 +289,8 @@ int main(int argc, char **argv) {
   applyKernel(localChunkOut->data,
               localChunk->data,
               localChunk->width,
-              localChunk->height,
+              localChunk->height - topBorder,
+              0, bottomBorder,
               (int *)laplacian1Kernel, 3, laplacian1KernelFactor
               // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
               // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
@@ -282,15 +303,19 @@ int main(int argc, char **argv) {
 
   // Main process saves the image to disk
   if (rank == 0) {
-    int dataPerChunk = imageChannel->width * chunkHeight;
     int dataOffset = imageChannel->width * chunkHeightMaster;
+    int chunkData = imageChannel->width * chunkHeight;
     for (int i = 1; i < numProcesses; ++i) {
       // Receive the processed chunk data
-      MPI_Recv(imageChannel->rawdata + dataOffset, dataPerChunk, MPI_UNSIGNED_CHAR, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      dataOffset += dataPerChunk;
+      MPI_Recv(imageChannel->rawdata + dataOffset, imageChannel->width * chunkHeight, MPI_UNSIGNED_CHAR, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+      dataOffset += chunkData;
     }
-    printf("Main boi got like all the data mang\n");
+    printf("Main got all data\n");
     memcpy(imageChannel->rawdata, localChunk->rawdata, imageChannel->width * chunkHeightMaster);
+
+    double elapsed = (double) (clock() - time_start) / CLOCKS_PER_SEC;
+    printf("TIME USED: %f\n\n", elapsed);
+
 
 
     // Map our single color image back to a normal BMP image with 3 color channels
@@ -313,8 +338,8 @@ int main(int argc, char **argv) {
   }
   else {
     // Send the processed chunk data
-    MPI_Send(localChunk->rawdata, localChunk->width * localChunk->height, MPI_UNSIGNED_CHAR, 0, 2, MPI_COMM_WORLD);
-    printf("Fuck yea rank %d RETURNED the mfkin data motherfucker\n", rank);
+    MPI_Send(localChunk->rawdata + (topBorder * localChunk->width), localChunk->width * (localChunk->height - topBorder - bottomBorder), MPI_UNSIGNED_CHAR, 0, 2, MPI_COMM_WORLD);
+    printf("Rank %d returned the modified data\n", rank);
   }
 
 graceful_exit:
@@ -326,7 +351,8 @@ error_exit:
     free(output);
 
 
+  free(localChunk);
 
-    MPI_Finalize();
-    return ret;
+  MPI_Finalize();
+  return ret;
 };
