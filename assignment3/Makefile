@@ -11,6 +11,7 @@ OBJ := $(patsubst %.c,%.o,$(SRC))
 
 CC := mpicc
 
+DEBUG = 1
 ifdef DEBUG
 FLAGS := -g
 else

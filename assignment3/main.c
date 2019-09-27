@@ -5,6 +5,8 @@
 #include <stdlib.h>
 #include <mpi.h>
 #include <time.h>
+#include <unistd.h>
+
 #include "libs/bitmap.h"
 
 // Convolutional Kernel Examples, each with dimension 3,
@@ -118,7 +120,8 @@ int main(int argc, char **argv) {
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
 
-    printf("MPI is set up. My rank: %d, number of processes: %d\n", rank, numProcesses);
+    printf("MPI is set up. My rank: %d, number of processes: %d, PID: %d\n", rank, numProcesses, getpid());
+    // sleep(30);
 
 
   /*
@@ -194,7 +197,9 @@ int main(int argc, char **argv) {
 
   // The local image chunk each rank will work on
   bmpImageChannel* localChunk;
+  // Number of rows in the localChunk which are top borders
   int topBorder = 0;
+  // Number of rows in the localChunk which are bottom borders
   int bottomBorder = 0;
 
   clock_t time_start;
@@ -252,6 +257,7 @@ int main(int argc, char **argv) {
       int bottom = 1;
       int top = i != (numProcesses - 1);
       int h = chunkHeight + top + bottom;
+      // Chunk metadata: {chunk width, chunk height, num rows top border, num rows bottom border}
       int meta[] = { imageChannel->width, h, top, bottom };
 
       // Send the chunk dimensions
@@ -262,10 +268,12 @@ int main(int argc, char **argv) {
     }
     printf("Main sent %d data\n", dataOffset);
 
-    localChunk = newBmpImageChannel(imageChannel->width, chunkHeightMaster + 1);
-    memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * (chunkHeightMaster + 1));
-    printf("Main must process %d data\n\n", localChunk->height*localChunk->width);
+    // "Send" data to main proc as well
     topBorder = 1;
+    int h = chunkHeightMaster + topBorder + bottomBorder;
+    localChunk = newBmpImageChannel(imageChannel->width, h);
+    memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * h);
+    printf("Main must process %d data\n\n", localChunk->height*localChunk->width);
   }
   else {
     // The workers
@@ -289,8 +297,11 @@ int main(int argc, char **argv) {
   applyKernel(localChunkOut->data,
               localChunk->data,
               localChunk->width,
-              localChunk->height - topBorder,
-              0, bottomBorder,
+              // localChunk->height,
+              // 0, 0,
+              localChunk->height - topBorder * 50,
+              0, 0,
+              // 0, bottomBorder * 50,
               (int *)laplacian1Kernel, 3, laplacian1KernelFactor
               // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
               // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
