@@ -25,6 +25,9 @@ int const sobelXKernel[] = {-1, -0, -1,
 float const sobelXKernelFactor = (float) 1.0;
 
 
+int const _laplacian1Kernel[] = {  0,  1,  2,
+                                 3,  4,  5,
+                                 6,  7,  8};
 int const laplacian1Kernel[] = {  -1,  -4,  -1,
                                  -4,  20,  -4,
                                  -1,  -4,  -1};
@@ -54,8 +57,8 @@ float const gaussianKernelFactor = (float) 1.0 / 256.0;
 
 
 // Helper function to swap bmpImageChannel pointers
-void swapImageChannel(bmpImageChannel **one, bmpImageChannel **two) {
-  bmpImageChannel *helper = *two;
+void swapImageChannel(bmpImageChannel *one, bmpImageChannel *two) {
+  bmpImageChannel helper = *two;
   *two = *one;
   *one = helper;
 }
@@ -66,12 +69,12 @@ void applyKernel(unsigned char **out, unsigned char **in,
                  unsigned int startX, unsigned int startY,
                  int *kernel, unsigned int kernelDim, float kernelFactor) {
   unsigned int const kernelCenter = (kernelDim / 2);
-  for (unsigned int y = startY; y < height; y++) {
-    for (unsigned int x = startX; x < width; x++) {
+  for (unsigned int y = startY; y < height; ++y) {
+    for (unsigned int x = startX; x < width; ++x) {
       int aggregate = 0;
-      for (unsigned int ky = 0; ky < kernelDim; ky++) {
+      for (unsigned int ky = 0; ky < kernelDim; ++ky) {
         int nky = kernelDim - 1 - ky;
-        for (unsigned int kx = 0; kx < kernelDim; kx++) {
+        for (unsigned int kx = 0; kx < kernelDim; ++kx) {
           int nkx = kernelDim - 1 - kx;
 
           int yy = y + (ky - kernelCenter);
@@ -110,19 +113,38 @@ void help(char const *exec, char const opt, char const *optarg) {
     fprintf(out, "Example: %s in.bmp out.bmp -i 10000\n", exec);
 }
 
+typedef struct {
+  // Width of image chunk
+  int width;
+  // Height of image chunk, excluding borders
+  int height;
+  // Number of top border rows in the image chunk data
+  int topBorder;
+  // Number of bottom border rows in the image chunk data
+  int bottomBorder;
+  // Starting row number (y-value) in the full image
+  int origRow;
+} ChunkMeta;
+
+void convolute(bmpImageChannel* localChunk, const ChunkMeta* meta);
+
+int rank;
+int numProcesses;
+
 int main(int argc, char **argv) {
-    // Set up MPI
-    MPI_Init(NULL, NULL);
+  // Set up MPI
+  MPI_Init(NULL, NULL);
 
-    // Find the rank of this process and the number of processes
-    int rank;
-    int numProcesses;
-    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
+  // Find the rank of this process and the number of processes
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+  MPI_Comm_size(MPI_COMM_WORLD, &numProcesses);
 
-    printf("MPI is set up. My rank: %d, number of processes: %d, PID: %d\n", rank, numProcesses, getpid());
-    // sleep(30);
+  printf("MPI is set up. My rank: %d, number of processes: %d, PID: %d\n", rank, numProcesses, getpid());
+#ifdef DEBUG
+  sleep(30);
+#endif
 
+  ChunkMeta chunkMetas[numProcesses];
 
   /*
     Parameter parsing, don't change this!
@@ -180,36 +202,16 @@ int main(int argc, char **argv) {
 
 
 
-
-
-
-
-
-  // Full image, only exists on main rank
-  bmpImage *image;
-  // Full grayscale image, only on main rank
-  bmpImageChannel *imageChannel;
-
-  // Number of rows in a chunk *excluding* borders
-  int chunkHeight;
-  // Number of rows in the main proc's chunk (has any non-divisible rows as well) *excluding* borders
-  int chunkHeightMaster;
-
   // The local image chunk each rank will work on
   bmpImageChannel* localChunk;
-  // Number of rows in the localChunk which are top borders
-  int topBorder = 0;
-  // Number of rows in the localChunk which are bottom borders
-  int bottomBorder = 0;
-
-  clock_t time_start;
 
   // Main process reads the image from disk
   if (rank == 0) {
     /*
         Create the BMP image and load it from disk.
     */
-    image = newBmpImage(0,0);
+    // Full image, only exists on main rank
+    bmpImage* image = newBmpImage(0,0);
     if (image == NULL) {
         fprintf(stderr, "Could not allocate new image!\n");
     }
@@ -222,7 +224,8 @@ int main(int argc, char **argv) {
 
 
     // Create a single color channel image. It is easier to work just with one color
-    imageChannel = newBmpImageChannel(image->width, image->height);
+    // Full grayscale image, only on main rank
+    bmpImageChannel* imageChannel = newBmpImageChannel(image->width, image->height);
     if (imageChannel == NULL) {
         fprintf(stderr, "Could not allocate new image channel!\n");
         freeBmpImage(image);
@@ -243,83 +246,54 @@ int main(int argc, char **argv) {
 
     printf("Image width: %d, height: %d, data: %d\n", imageChannel->width, imageChannel->height, imageChannel->width*imageChannel->height);
 
+    clock_t time_start = clock();
 
+    // Number of rows in a chunk *excluding* borders
+    int chunkHeight = imageChannel->height / numProcesses;
+    // Number of rows in the main proc's chunk (has any non-divisible rows as well) *excluding* borders
+    int chunkHeightMaster = chunkHeight + (imageChannel->height % numProcesses);
 
-    time_start = clock();
+    int borderSize = 1;
 
-    chunkHeight = imageChannel->height / numProcesses;
-    chunkHeightMaster = chunkHeight + (imageChannel->height % numProcesses);
-
-    int dataOffset = (chunkHeightMaster - 0) * imageChannel->width;
-    int chunkData = imageChannel->width * chunkHeight;
+    // The offset of the whole image data to start sending from
+    int dataOffset = imageChannel->width * (chunkHeightMaster - borderSize);
+    int chunkBytes = imageChannel->width * chunkHeight;
 
     for (int i = 1; i < numProcesses; ++i) {
-      int bottom = 1;
-      int top = i != (numProcesses - 1);
-      int h = chunkHeight + top + bottom;
+      int bottom = borderSize;
+      int top = i != (numProcesses - 1) ? borderSize : 0;
+      int dataHeight = chunkHeight + top + bottom;
+
       // Chunk metadata: {chunk width, chunk height, num rows top border, num rows bottom border}
-      int meta[] = { imageChannel->width, h, top, bottom };
+      chunkMetas[i] = (ChunkMeta) {
+        imageChannel->width, chunkHeight,
+        top, bottom
+      };
 
       // Send the chunk dimensions
-      MPI_Send(&meta, 4, MPI_INT, i, 0, MPI_COMM_WORLD);
+      MPI_Send(&chunkMetas[i], sizeof(ChunkMeta), MPI_UNSIGNED_CHAR, i, 0, MPI_COMM_WORLD);
       // Send the actual chunk data
-      MPI_Send(imageChannel->rawdata + dataOffset, imageChannel->width * h, MPI_UNSIGNED_CHAR, i, 1, MPI_COMM_WORLD);
-      dataOffset += chunkData;
+      MPI_Send(imageChannel->rawdata + dataOffset, imageChannel->width * (chunkHeight + top + bottom), MPI_UNSIGNED_CHAR, i, 1, MPI_COMM_WORLD);
+      dataOffset += chunkBytes;
     }
     printf("Main sent %d data\n", dataOffset);
 
     // "Send" data to main proc as well
-    topBorder = 1;
-    int h = chunkHeightMaster + topBorder + bottomBorder;
-    localChunk = newBmpImageChannel(imageChannel->width, h);
-    memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * h);
+    ChunkMeta meta = {imageChannel->width, chunkHeightMaster, .topBorder = 1, .bottomBorder = 0};
+    int dataHeight = chunkHeightMaster + meta.topBorder + meta.bottomBorder;
+    localChunk = newBmpImageChannel(imageChannel->width, dataHeight);
+    memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * dataHeight);
     printf("Main must process %d data\n\n", localChunk->height*localChunk->width);
-  }
-  else {
-    // The workers
-    int meta[4];
-    MPI_Recv(&meta, 4, MPI_INT, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    localChunk = newBmpImageChannel(meta[0], meta[1]);
-    topBorder = meta[2];
-    bottomBorder = meta[3];
 
-    MPI_Recv(localChunk->rawdata, meta[0] * meta[1], MPI_UNSIGNED_CHAR, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-    printf("Rank %d got %d data and meta (%d %d %d %d)\n", rank, meta[0] * meta[1], meta[0], meta[1], meta[2], meta[3]);
-  }
+    printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
+    convolute(localChunk, &meta);
+    printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
 
-
-
-  printf("Rank %d topborder: %d, bottomborder: %d\n", rank, topBorder, bottomBorder);
-
-  //Here we do the actual computation!
-  // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
-  bmpImageChannel *localChunkOut = newBmpImageChannel(localChunk->width, localChunk->height);
-  applyKernel(localChunkOut->data,
-              localChunk->data,
-              localChunk->width,
-              // localChunk->height,
-              // 0, 0,
-              localChunk->height - topBorder * 50,
-              0, 0,
-              // 0, bottomBorder * 50,
-              (int *)laplacian1Kernel, 3, laplacian1KernelFactor
-              // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
-              // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
-              // (int *)gaussianKernel, 5, gaussianKernelFactor
-              );
-  swapImageChannel(&localChunkOut, &localChunk);
-  freeBmpImageChannel(localChunkOut);
-
-
-
-  // Main process saves the image to disk
-  if (rank == 0) {
-    int dataOffset = imageChannel->width * chunkHeightMaster;
-    int chunkData = imageChannel->width * chunkHeight;
+    dataOffset = imageChannel->width * (chunkHeightMaster - borderSize);
     for (int i = 1; i < numProcesses; ++i) {
       // Receive the processed chunk data
       MPI_Recv(imageChannel->rawdata + dataOffset, imageChannel->width * chunkHeight, MPI_UNSIGNED_CHAR, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-      dataOffset += chunkData;
+      dataOffset += chunkBytes;
     }
     printf("Main got all data\n");
     memcpy(imageChannel->rawdata, localChunk->rawdata, imageChannel->width * chunkHeightMaster);
@@ -347,11 +321,30 @@ int main(int argc, char **argv) {
       goto error_exit;
     };
   }
+
+  // Procedure for all non-main ranks
   else {
+    ChunkMeta meta;
+    MPI_Recv(&meta, sizeof(ChunkMeta), MPI_UNSIGNED_CHAR, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    printf("Rank %d got meta (%d %d %d %d)\n", rank, meta.width, meta.height, meta.topBorder, meta.bottomBorder);
+
+    int dataHeight = meta.height + meta.topBorder + meta.bottomBorder;
+    localChunk = newBmpImageChannel(meta.width, dataHeight);
+
+    MPI_Recv(localChunk->rawdata, meta.width * dataHeight, MPI_UNSIGNED_CHAR, 0, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    printf("Rank %d got %d data\n", rank, meta.width*dataHeight);
+
+    printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
+    convolute(localChunk, &meta);
+
+    printf("Rank %d will return %d data\n", rank, meta.width * meta.height);
+    printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
     // Send the processed chunk data
-    MPI_Send(localChunk->rawdata + (topBorder * localChunk->width), localChunk->width * (localChunk->height - topBorder - bottomBorder), MPI_UNSIGNED_CHAR, 0, 2, MPI_COMM_WORLD);
+    MPI_Send(localChunk->rawdata + (meta.bottomBorder * localChunk->width * 0), meta.width * meta.height, MPI_UNSIGNED_CHAR, 0, 2, MPI_COMM_WORLD);
     printf("Rank %d returned the modified data\n", rank);
   }
+
+
 
 graceful_exit:
   ret = 0;
@@ -367,3 +360,24 @@ error_exit:
   MPI_Finalize();
   return ret;
 };
+
+void convolute(bmpImageChannel* localChunk, const ChunkMeta* meta) {
+  //Here we do the actual computation!
+  // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
+  bmpImageChannel *localChunkOut = newBmpImageChannel(localChunk->width, localChunk->height);
+  applyKernel(localChunkOut->data,
+              localChunk->data,
+              localChunk->width,
+              localChunk->height,
+              0, 0,
+              // localChunk->height - meta->topBorder,
+              // meta->height,
+              // 0, meta->bottomBorder,
+              (int *)laplacian1Kernel, 3, laplacian1KernelFactor
+              // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
+              // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
+              // (int *)gaussianKernel, 5, gaussianKernelFactor
+              );
+  swapImageChannel(localChunkOut, localChunk);
+  freeBmpImageChannel(localChunkOut);
+}
