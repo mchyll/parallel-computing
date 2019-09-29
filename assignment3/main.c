@@ -289,7 +289,7 @@ int main(int argc, char **argv) {
     convolute(localChunk, &meta);
     printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
 
-    dataOffset = imageChannel->width * (chunkHeightMaster - borderSize);
+    dataOffset = imageChannel->width * (chunkHeightMaster);
     for (int i = 1; i < numProcesses; ++i) {
       // Receive the processed chunk data
       MPI_Recv(imageChannel->rawdata + dataOffset, imageChannel->width * chunkHeight, MPI_UNSIGNED_CHAR, i, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
@@ -340,7 +340,7 @@ int main(int argc, char **argv) {
     printf("Rank %d will return %d data\n", rank, meta.width * meta.height);
     printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
     // Send the processed chunk data
-    MPI_Send(localChunk->rawdata + (meta.bottomBorder * localChunk->width * 0), meta.width * meta.height, MPI_UNSIGNED_CHAR, 0, 2, MPI_COMM_WORLD);
+    MPI_Send(localChunk->rawdata + (meta.bottomBorder * localChunk->width), meta.width * meta.height, MPI_UNSIGNED_CHAR, 0, 2, MPI_COMM_WORLD);
     printf("Rank %d returned the modified data\n", rank);
   }
 

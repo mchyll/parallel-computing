@@ -27,11 +27,11 @@ serial: serial_main.c libs/bitmap.c
 	gcc $(FLAGS) $^ -o $@
 
 run: main compare
-	mpirun main img/bilde.bmp after_bilde.bmp
-	# ./compare aftermath.bmp seriaftermath.bmp
+	mpirun main img/before.bmp after.bmp
+	./compare after.bmp after_serial.bmp
 
 runserial: serial
-	./serial img/before.bmp seriaftermath.bmp
+	./serial img/before.bmp after_serial.bmp
 
 compare: compare.c libs/bitmap.c
 	gcc -g $^ -o $@
