@@ -6,12 +6,14 @@
 
 SRC := $(wildcard *.c)
 SRC += $(wildcard libs/*.c)
-SRC := $(filter-out serial_main.c compare.c bmptest.c, $(SRC))
+SRC := $(filter-out serial_main.c compare.c bmptest.c test.c, $(SRC))
 OBJ := $(patsubst %.c,%.o,$(SRC))
 
 CC := mpicc
 
 DEBUG = 1
+ARGS = --iterations 3
+
 ifdef DEBUG
 FLAGS := -g
 else
@@ -26,8 +28,9 @@ main: $(OBJ)
 serial: serial_main.c libs/bitmap.c
 	gcc $(FLAGS) $^ -o $@
 
-run: main compare
-	mpirun main img/before.bmp after.bmp
+run: main compare serial
+	mpirun -np 3 main $(ARGS) img/before.bmp after.bmp
+	./serial $(ARGS) img/before.bmp after_serial.bmp
 	./compare after.bmp after_serial.bmp
 
 runserial: serial

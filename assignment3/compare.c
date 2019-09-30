@@ -63,13 +63,24 @@ int main(int argc, char **argv) {
 
     bmpImage* diff = newBmpImage(img1->width, img1->height);
     unsigned char d;
+    unsigned char hasDiff = 0;
     for (int i = 0; i < img1->width*img1->height; ++i) {
         d = (img1->rawdata[i] - img2->rawdata[i]);
-        if (d < 0) d = -d;
-        if (d > 255) d = 255;
-        diff->rawdata[i].r = d;
-        diff->rawdata[i].g = d;
-        diff->rawdata[i].b = d;
+        if (d != 0) {
+            hasDiff = 1;
+            if (d < 0) d = -d;
+            if (d > 255) d = 255;
+            diff->rawdata[i].r = d;
+            diff->rawdata[i].g = d;
+            diff->rawdata[i].b = d;
+        }
+    }
+
+    if (!hasDiff) {
+        printf("Images are equal!\n");
+    }
+    else {
+        printf("Images DIFFER\n");
     }
 
     // Write the diff image back to disk
