@@ -79,7 +79,7 @@ void applyKernel(unsigned char **out, unsigned char **in,
 
           int yy = y + (ky - kernelCenter);
           int xx = x + (kx - kernelCenter);
-          if (xx >= 0 && xx < (int) width && yy >=0 && yy < (int) height)
+          if (xx >= 0 && xx < (int) width && yy >=0 && yy < (int) height)  // TODO: Her tror kernel at bildet stopper en rad for tidlig i toppen, dersom jeg sier at height=chunk.height-topBorder
             aggregate += in[yy][xx] * kernel[nky * kernelDim + nkx];
         }
       }
@@ -280,6 +280,7 @@ int main(int argc, char **argv) {
 
     // "Send" data to main proc as well
     ChunkMeta meta = {imageChannel->width, chunkHeightMaster, .topBorder = 1, .bottomBorder = 0};
+    printf("Rank %d got meta (%d %d %d %d)\n", rank, meta.width, meta.height, meta.topBorder, meta.bottomBorder);
     int dataHeight = chunkHeightMaster + meta.topBorder + meta.bottomBorder;
     localChunk = newBmpImageChannel(imageChannel->width, dataHeight);
     memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * dataHeight);
