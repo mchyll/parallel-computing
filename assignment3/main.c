@@ -57,8 +57,8 @@ float const gaussianKernelFactor = (float) 1.0 / 256.0;
 
 
 // Helper function to swap bmpImageChannel pointers
-void swapImageChannel(bmpImageChannel *one, bmpImageChannel *two) {
-  bmpImageChannel helper = *two;
+void swapImageChannel(bmpImageChannel **one, bmpImageChannel **two) {
+  bmpImageChannel *helper = *two;
   *two = *one;
   *one = helper;
 }
@@ -126,7 +126,7 @@ typedef struct {
   int origRow;
 } ChunkMeta;
 
-void convolute(bmpImageChannel* localChunk, const ChunkMeta* meta);
+void convolute(bmpImageChannel** localChunk, const ChunkMeta* meta, int iterations);
 
 int rank;
 int numProcesses;
@@ -287,7 +287,7 @@ int main(int argc, char **argv) {
     printf("Main must process %d data\n\n", localChunk->height*localChunk->width);
 
     printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
-    convolute(localChunk, &meta);
+    convolute(&localChunk, &meta, iterations);
     printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
 
     dataOffset = imageChannel->width * (chunkHeightMaster);
@@ -336,7 +336,7 @@ int main(int argc, char **argv) {
     printf("Rank %d got %d data\n", rank, meta.width*dataHeight);
 
     printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
-    convolute(localChunk, &meta);
+    convolute(&localChunk, &meta, iterations);
 
     printf("Rank %d will return %d data\n", rank, meta.width * meta.height);
     printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
@@ -362,23 +362,35 @@ error_exit:
   return ret;
 };
 
-void convolute(bmpImageChannel* localChunk, const ChunkMeta* meta) {
+void convolute(bmpImageChannel** localChunkPtr, const ChunkMeta* meta, int iterations) {
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
-  bmpImageChannel *localChunkOut = newBmpImageChannel(localChunk->width, localChunk->height);
-  applyKernel(localChunkOut->data,
-              localChunk->data,
-              localChunk->width,
-              localChunk->height,
-              0, 0,
-              // localChunk->height - meta->topBorder,
-              // meta->height,
-              // 0, meta->bottomBorder,
-              (int *)laplacian1Kernel, 3, laplacian1KernelFactor
-              // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
-              // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
-              // (int *)gaussianKernel, 5, gaussianKernelFactor
-              );
-  swapImageChannel(localChunkOut, localChunk);
+
+  // Helper pointer so we don't have to double-dereference localChunkPtr all the time
+  bmpImageChannel* localChunk = *localChunkPtr;
+  bmpImageChannel* localChunkOut = newBmpImageChannel(localChunk->width, localChunk->height);
+  for (int i = 0; i < iterations; ++i) {
+    applyKernel(localChunkOut->data,
+                localChunk->data,
+                localChunk->width,
+                localChunk->height,
+                0, 0,
+                // localChunk->height - meta->topBorder,
+                // meta->height,
+                // 0, meta->bottomBorder,
+                (int *)laplacian1Kernel, 3, laplacian1KernelFactor
+                // (int *)laplacian2Kernel, 3, laplacian2KernelFactor
+                // (int *)laplacian3Kernel, 3, laplacian3KernelFactor
+                // (int *)gaussianKernel, 5, gaussianKernelFactor
+                );
+    swapImageChannel(&localChunkOut, localChunkPtr);
+    // bmpImageChannel* tmp = *localChunkPtr;
+    // *localChunkPtr = localChunkOut;
+    // localChunkOut = tmp;
+    localChunk = *localChunkPtr;
+
+    // TODO: BORDER EXCHANGE
+    
+  }
   freeBmpImageChannel(localChunkOut);
 }
