@@ -127,6 +127,7 @@ typedef struct {
 } ChunkMeta;
 
 void convolute(bmpImageChannel** localChunk, const ChunkMeta* meta, int iterations);
+void borderExchange(bmpImageChannel* localChunk, const ChunkMeta* meta);
 
 int rank;
 int numProcesses;
@@ -246,7 +247,9 @@ int main(int argc, char **argv) {
 
     printf("Image width: %d, height: %d, data: %d\n", imageChannel->width, imageChannel->height, imageChannel->width*imageChannel->height);
 
-    clock_t time_start = clock();
+    struct timespec time_start;
+    clock_gettime(CLOCK_REALTIME, &time_start);
+    double t_start = time_start.tv_sec + (double)time_start.tv_nsec / 1e9;
 
     // Number of rows in a chunk *excluding* borders
     int chunkHeight = imageChannel->height / numProcesses;
@@ -284,11 +287,11 @@ int main(int argc, char **argv) {
     int dataHeight = chunkHeightMaster + meta.topBorder + meta.bottomBorder;
     localChunk = newBmpImageChannel(imageChannel->width, dataHeight);
     memcpy(localChunk->rawdata, imageChannel->rawdata, imageChannel->width * dataHeight);
-    printf("Main must process %d data\n\n", localChunk->height*localChunk->width);
+    printf("Main must process %d data\n", localChunk->height*localChunk->width);
 
-    printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
+    printf("Rank %d: local chunk is (%d x %d)\n\n", rank, localChunk->width, localChunk->height);
     convolute(&localChunk, &meta, iterations);
-    printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
+    // printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
 
     dataOffset = imageChannel->width * (chunkHeightMaster);
     for (int i = 1; i < numProcesses; ++i) {
@@ -299,7 +302,10 @@ int main(int argc, char **argv) {
     printf("Main got all data\n");
     memcpy(imageChannel->rawdata, localChunk->rawdata, imageChannel->width * chunkHeightMaster);
 
-    double elapsed = (double) (clock() - time_start) / CLOCKS_PER_SEC;
+    struct timespec time_end;
+    clock_gettime(CLOCK_REALTIME, &time_end);
+    double t_end = time_end.tv_sec + (double)time_end.tv_nsec / 1e9;
+    double elapsed = t_end - t_start;
     printf("TIME USED: %f\n\n", elapsed);
 
 
@@ -339,7 +345,7 @@ int main(int argc, char **argv) {
     convolute(&localChunk, &meta, iterations);
 
     printf("Rank %d will return %d data\n", rank, meta.width * meta.height);
-    printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
+    // printf("Rank %d: local chunk is (%d x %d)\n", rank, localChunk->width, localChunk->height);
     // Send the processed chunk data
     MPI_Send(localChunk->rawdata + (meta.bottomBorder * localChunk->width), meta.width * meta.height, MPI_UNSIGNED_CHAR, 0, 2, MPI_COMM_WORLD);
     printf("Rank %d returned the modified data\n", rank);
@@ -389,8 +395,95 @@ void convolute(bmpImageChannel** localChunkPtr, const ChunkMeta* meta, int itera
     // localChunkOut = tmp;
     localChunk = *localChunkPtr;
 
-    // TODO: BORDER EXCHANGE
-    
+    borderExchange(localChunk, meta);
   }
+
   freeBmpImageChannel(localChunkOut);
+}
+
+void borderExchange(bmpImageChannel* localChunk, const ChunkMeta* meta) {
+  // EVEN RANKS start by sending their top rows up
+  // sleep(rank);
+  if (rank % 2 == 0) {
+    // 1. SEND TOP EDGE INTO BOTTOM BORDER OF RANK ABOVE
+    // The topmost rank can't send up
+    if (rank != numProcesses - 1) {
+      // printf("1: Rank %d sending top edge up\n", rank);fflush(stdout);
+      MPI_Send(
+        localChunk->rawdata + meta->width * (meta->bottomBorder + meta->height - meta->topBorder),
+        meta->width * meta->topBorder, MPI_UNSIGNED_CHAR, rank + 1, 11, MPI_COMM_WORLD);
+    }
+
+    // sleep(rank + numProcesses + 1);
+
+    // 2. RECEIVE BOTTOM BORDER FROM TOP EDGE OF RANK BELOW
+    // Rank 0 can't receive from rank below
+    if (rank != 0) {
+      // printf("2: Rank %d receiving bottom border from below\n", rank);fflush(stdout);
+      MPI_Recv(localChunk->rawdata, meta->width * meta->bottomBorder, MPI_UNSIGNED_CHAR, rank - 1, 12, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+
+    // sleep(rank + numProcesses + 1);
+
+    // 3. SEND BOTTOM EDGE INTO TOP BORDER OF RANK BELOW
+    // Rank 0 can't send down
+    if (rank != 0) {
+      // printf("3: Rank %d sending bottom edge down\n", rank);fflush(stdout);
+      MPI_Send(localChunk->rawdata + meta->width * meta->bottomBorder, meta->width * meta->bottomBorder, MPI_UNSIGNED_CHAR, rank - 1, 13, MPI_COMM_WORLD);
+    }
+
+    // sleep(rank + numProcesses + 1);
+
+    // 4. RECEIVE TOP BORDER FROM BOTTOM EDGE OF RANK ABOVE
+    // The topmost rank can't receive from rank above
+    if (rank != numProcesses - 1) {
+      // printf("4: Rank %d receiving top border from above\n", rank);fflush(stdout);
+      MPI_Recv(
+        localChunk->rawdata + meta->width * (meta->bottomBorder + meta->height),
+        meta->width * meta->topBorder, MPI_UNSIGNED_CHAR, rank + 1, 14, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+  }
+
+  // ODD RANKS start by receiving bottom border
+  else {
+    // 1. RECEIVE BOTTOM BORDER FROM TOP EDGE OF RANK BELOW
+    // Rank 0 can't receive from rank below
+    if (rank != 0) {
+      // printf("1: Rank %d receiving bottom border from below\n", rank);fflush(stdout);
+      MPI_Recv(localChunk->rawdata, meta->width * meta->bottomBorder, MPI_UNSIGNED_CHAR, rank - 1, 11, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+
+    // sleep(rank + numProcesses + 1);
+
+    // 2. SEND TOP EDGE INTO BOTTOM BORDER OF RANK ABOVE
+    // The topmost rank can't send up
+    if (rank != numProcesses - 1) {
+      // printf("2: Rank %d sending top edge up\n", rank);fflush(stdout);
+      MPI_Send(
+        localChunk->rawdata + meta->width * (meta->bottomBorder + meta->height - meta->topBorder),
+        meta->width * meta->topBorder, MPI_UNSIGNED_CHAR, rank + 1, 12, MPI_COMM_WORLD);
+    }
+
+    // sleep(rank + numProcesses + 1);
+
+    // 3. RECEIVE TOP BORDER FROM BOTTOM EDGE OF RANK ABOVE
+    // The topmost rank can't receive from rank above
+    if (rank != (numProcesses - 1)) {
+      // printf("3: Rank %d receiving top border from above\n", rank);fflush(stdout);
+      MPI_Recv(
+        localChunk->rawdata + meta->width * (meta->bottomBorder + meta->height),
+        meta->width * meta->topBorder, MPI_UNSIGNED_CHAR, rank + 1, 13, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+    }
+
+    // sleep(rank + numProcesses + 1);
+
+    // 4. SEND BOTTOM EDGE INTO TOP BORDER OF RANK BELOW
+    // Rank 0 can't send down
+    if (rank != 0) {
+      // printf("4: Rank %d sending bottom edge down\n", rank);fflush(stdout);
+      MPI_Send(
+        localChunk->rawdata + meta->width * meta->bottomBorder,
+        meta->width * meta->bottomBorder, MPI_UNSIGNED_CHAR, rank - 1, 14, MPI_COMM_WORLD);
+    }
+  }
 }

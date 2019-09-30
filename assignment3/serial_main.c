@@ -196,7 +196,9 @@ int main(int argc, char **argv) {
 
 
 
-  clock_t time_start = clock();
+  struct timespec time_start;
+  clock_gettime(CLOCK_REALTIME, &time_start);
+  double t_start = time_start.tv_sec + (double)time_start.tv_nsec / 1e9;
 
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
@@ -215,7 +217,10 @@ int main(int argc, char **argv) {
   }
   freeBmpImageChannel(processImageChannel);
 
-  double elapsed = (double) (clock() - time_start) / CLOCKS_PER_SEC;
+  struct timespec time_end;
+  clock_gettime(CLOCK_REALTIME, &time_end);
+  double t_end = time_end.tv_sec + (double)time_end.tv_nsec / 1e9;
+  double elapsed = t_end - t_start;
   printf("TIME USED: %f\n\n", elapsed);
 
 

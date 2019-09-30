@@ -12,7 +12,7 @@ OBJ := $(patsubst %.c,%.o,$(SRC))
 CC := mpicc
 
 DEBUG = 1
-ARGS = --iterations 3
+ARGS = --iterations 1
 
 ifdef DEBUG
 FLAGS := -g
@@ -29,7 +29,7 @@ serial: serial_main.c libs/bitmap.c
 	gcc $(FLAGS) $^ -o $@
 
 run: main compare serial
-	mpirun -np 3 main $(ARGS) img/before.bmp after.bmp
+	mpirun main $(ARGS) img/before.bmp after.bmp
 	./serial $(ARGS) img/before.bmp after_serial.bmp
 	./compare after.bmp after_serial.bmp
 
