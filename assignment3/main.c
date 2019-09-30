@@ -1,3 +1,11 @@
+/*
+
+PARALLEL COMPUTING - ASSIGNMENT 3
+Author: Magnus Conrad Hyll
+
+*/
+
+
 #include <stdbool.h>
 #include <stdio.h>
 #include <string.h>
