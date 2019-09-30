@@ -221,7 +221,7 @@ int main(int argc, char **argv) {
   clock_gettime(CLOCK_REALTIME, &time_end);
   double t_end = time_end.tv_sec + (double)time_end.tv_nsec / 1e9;
   double elapsed = t_end - t_start;
-  printf("TIME USED: %f\n\n", elapsed);
+  printf("TIME USED: %f s\n\n", elapsed);
 
 
 
