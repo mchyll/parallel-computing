@@ -33,11 +33,11 @@ static unsigned int res = 2048;
 static unsigned int maxDwell = 512;
 
 
-pixel getDwellColour(unsigned int const y, unsigned int const x, unsigned long long const dwell) {
+pixel* getDwellColour(unsigned int const y, unsigned int const x, unsigned long long const dwell) {
 	static const double log2 = 0.693147180559945309417232121458176568075500134360255254120;
 	double complex z = x + y * I;
 	unsigned long long index = dwell + 1 - log(log(cabs(z)/log2));
-	return colourMap[index % colourMapSize];
+	return &colourMap[index % colourMapSize];
 }
 
 
@@ -48,15 +48,15 @@ double complex getInitialValue(double complex const cmin, double complex const c
 	return ret;
 }
 
-double complex computeNextValue(double complex const z, double complex const init) {
-	return (z * z) + init;
-}
+// double complex computeNextValue(double complex const z, double complex const init) {
+// 	return (z * z) + init;
+// }
 
-bool isPartOfMandelbrot(double complex const z, double const factor) {
-	return cabs(z) < (factor * factor);
-}
+// bool isPartOfMandelbrot(double complex const z, double const factor) {
+// 	return cabs(z) < (factor * factor);
+// }
 
-double pixelDwellRuntime = 0;
+// double pixelDwellRuntime = 0;
 unsigned long long pixelDwell(double complex const cmin,
 						double complex const cmax,
 						unsigned int const y,
@@ -67,15 +67,15 @@ unsigned long long pixelDwell(double complex const cmin,
     // clock_gettime(CLOCK_REALTIME, &time);
     // double tStart = time.tv_sec + (double)time.tv_nsec / 1e9;
 
-	double complex z = getInitialValue(cmin, cmax, y, x);
-	unsigned int const dwellInc = 1;
+	double complex init = getInitialValue(cmin, cmax, y, x);
+	double complex z = init;
 	unsigned long long dwell = 0;
 
 	// Exit condition: dwell is maxDwell or |z| >= 4
-	while(dwell < maxDwell && isPartOfMandelbrot(z, 2.0)) {
+	while (dwell < maxDwell && cabs(z) < 4.0) {
 		// z = z² + initValue
-		z = computeNextValue(z, getInitialValue(cmin, cmax, y, x));
-		dwell += dwellInc;
+		z = (z * z) + init;
+		++dwell;
 	}
 
     // clock_gettime(CLOCK_REALTIME, &time);
@@ -96,12 +96,10 @@ void computeDwellBuffer(unsigned long long **buffer, double complex cmin, double
 void mapDwellBuffer(bmpImage *image, unsigned long long **buffer) {
 	for (unsigned int y = 0; y < res; y++) {
 		for (unsigned int x = 0; x < res; x++) {
-			pixel *colour = malloc(sizeof(pixel));
-			*colour = getDwellColour(y, x, buffer[y][x]);
+			pixel *colour = getDwellColour(y, x, buffer[y][x]);
 			image->data[y][x].r = colour->r;
 			image->data[y][x].g = colour->g;
 			image->data[y][x].b = colour->b;
-			free(colour);
 		}
 	}
 }
