@@ -6,3 +6,7 @@
 
 # Ignore out executables, usually they're named main
 *main
+
+assignment4/mandel/
+.mandelnav
+output/

@@ -10,6 +10,7 @@
 #include "libs/bitmap.h"
 #include "libs/utilities.h"
 #include "main.h"
+#include <time.h>
 
 // colourGradientSteps is defined in main.h
 // first step MUST be 0.0
@@ -55,11 +56,17 @@ bool isPartOfMandelbrot(double complex const z, double const factor) {
 	return cabs(z) < (factor * factor);
 }
 
+double pixelDwellRuntime = 0;
 unsigned long long pixelDwell(double complex const cmin,
 						double complex const cmax,
 						unsigned int const y,
 						unsigned int const x)
 {
+
+    // struct timespec time;
+    // clock_gettime(CLOCK_REALTIME, &time);
+    // double tStart = time.tv_sec + (double)time.tv_nsec / 1e9;
+
 	double complex z = getInitialValue(cmin, cmax, y, x);
 	unsigned int const dwellInc = 1;
 	unsigned long long dwell = 0;
@@ -71,20 +78,24 @@ unsigned long long pixelDwell(double complex const cmin,
 		dwell += dwellInc;
 	}
 
+    // clock_gettime(CLOCK_REALTIME, &time);
+    // double tEnd = time.tv_sec + (double)time.tv_nsec / 1e9;
+	// pixelDwellRuntime += tEnd - tStart;
+
 	return dwell;
 }
 
 void computeDwellBuffer(unsigned long long **buffer, double complex cmin, double complex cmax) {
-	for (unsigned int x = 0; x < res; x++) {
-		for (unsigned int y = 0; y < res; y++) {
+	for (unsigned int y = 0; y < res; y++) {
+		for (unsigned int x = 0; x < res; x++) {
 			buffer[y][x] = pixelDwell(cmin, cmax, y, x);
 		}
 	}
 }
 
 void mapDwellBuffer(bmpImage *image, unsigned long long **buffer) {
-	for (unsigned int x = 0; x < res; x++) {
-		for (unsigned int y = 0; y < res; y++) {
+	for (unsigned int y = 0; y < res; y++) {
+		for (unsigned int x = 0; x < res; x++) {
 			pixel *colour = malloc(sizeof(pixel));
 			*colour = getDwellColour(y, x, buffer[y][x]);
 			image->data[y][x].r = colour->r;
@@ -234,6 +245,8 @@ int main( int argc, char *argv[] )
 
 	//Map the dwell buffer to the bmpImage with fancy colors
 	mapDwellBuffer(image, dwellBuffer);
+
+	// printf("pixelDwell total run time: %f\n", pixelDwellRuntime);
 
 	// Save the Image
 	if(saveBmpImage(image, output)) {
