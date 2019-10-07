@@ -1,3 +1,7 @@
+/*
+PARALLEL COMPUTING - ASSIGNMENT 4
+Magnus Conrad Hyll
+*/
 
 #include <getopt.h>
 #include <stdio.h>
@@ -67,13 +71,16 @@ unsigned long long pixelDwell(double complex const cmin,
     // clock_gettime(CLOCK_REALTIME, &time);
     // double tStart = time.tv_sec + (double)time.tv_nsec / 1e9;
 
+	// Calculate getInitialValue only once and keep the result for later
 	double complex init = getInitialValue(cmin, cmax, y, x);
 	double complex z = init;
 	unsigned long long dwell = 0;
 
 	// Exit condition: dwell is maxDwell or |z| >= 4
+	// isPartOfMandelbrot is inlined as cabs(z) < 4.0
 	while (dwell < maxDwell && cabs(z) < 4.0) {
 		// z = z² + initValue
+		// computeNextValue is inlined as (z * z) + init
 		z = (z * z) + init;
 		++dwell;
 	}
