@@ -1,4 +1,4 @@
-RES := 1024
+RES := 8192
 OUTPUT := output/mandel.bmp
 OPTIMIZATION := 3
 

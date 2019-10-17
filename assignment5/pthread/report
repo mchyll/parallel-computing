@@ -1,0 +1,11 @@
+Task 1
+a) Baseline time
+/usr/bin/time mandel/mandel -o output/mandel.bmp -r 8192 -x 0.5 -y 0.5 -s 1.0 -p 4 -c 1 -i 512
+Center:      [0.500000,0.500000]
+Zoom:        100%
+Iterations:  512
+Window:      Re[-1.500000,0.500000], Im[-1.000000,1.000000]
+Output:      output/mandel.bmp
+11.64user 1.47system 0:13.35elapsed 98%CPU (0avgtext+0avgdata 460928maxresident)k
+56inputs+393224outputs (0major+114790minor)pagefaults 0swaps
+
