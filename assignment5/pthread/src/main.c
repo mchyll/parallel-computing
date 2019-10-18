@@ -35,9 +35,21 @@ typedef struct jobQueue {
 	struct jobQueue *next;
 } jobQueue;
 
+jobQueue *jobQueueHead = NULL;
+pthread_mutex_t activeThreadsMutex = PTHREAD_MUTEX_INITIALIZER;
+int activeThreads = 0;
+pthread_mutex_t jobsMutex = PTHREAD_MUTEX_INITIALIZER;
+int numJobs = 0;
+
+void marianiSilver( dwellType *buffer,
+					unsigned int const atY,
+					unsigned int const atX,
+					unsigned int const blockSize);
 
 // On Error jobQueue will be freed and the application should exit
 void putJob (jobQueue **head, job newJob) {
+	printf("Putting a job\n");
+	pthread_mutex_lock(&jobsMutex);
 	jobQueue *new = malloc(sizeof(jobQueue));
 	if (new != NULL) {
 		new->item = newJob;
@@ -51,20 +63,29 @@ void putJob (jobQueue **head, job newJob) {
 			(*head) = tmp;
 		}
 	}
+	numJobs++;
+	pthread_mutex_unlock(&jobsMutex);
 }
 
 // Only allowed to be called if something is in the job queue!
 job popJob (jobQueue **head) {
+	// pthread_mutex_lock(&jobsMutex);
 	jobQueue *current = *head;
 	job poppedJob = current->item;
 	(*head) = current->next;
 	free(current);
+	numJobs--;
+	// pthread_mutex_unlock(&jobsMutex);
 	return poppedJob;
 }
 
-jobQueue *jobQueueHead = NULL;
-int activeThreads;
-int numJobs;
+int hasJobs() {
+	pthread_mutex_lock(&jobsMutex);
+	int num = numJobs;
+	pthread_mutex_unlock(&jobsMutex);
+	sleep(1);
+	return num;
+}
 
 void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int const, unsigned int const),
 			   dwellType *buffer,
@@ -77,25 +98,52 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 }
 
 void *worker(void *id) {
-	(void) id;
+	printf("Worker %d started\n", *((int*) id));
 	// This could be your pthread function
 
-	while (true) {
-		if (numJobs > 0) {
-			activeThreads++;
-			job j = popJob(jobQueueHead);
-			marianiSilver(j.dwellBuffer, j.atX, j.atY, j.blockSize);
-			activeThreads--;
-			if (activeThreads == 0) break;
-		}
+	while (hasJobs()) {
+		// if (numJobs > 0) {
+			// pthread_mutex_lock(&activeThreadsMutex);
+			// activeThreads++;
+			// pthread_mutex_unlock(&activeThreadsMutex);
+
+			pthread_mutex_lock(&jobsMutex);
+			if (numJobs == 0) {
+				pthread_mutex_unlock(&jobsMutex);
+			}
+			else {
+				job j = popJob(&jobQueueHead);
+				pthread_mutex_unlock(&jobsMutex);
+
+				printf("Worker %d got a job\n", *((int*) id));
+				marianiSilver(j.dwellBuffer, j.atX, j.atY, j.blockSize);
+			}
+			// pthread_mutex_lock(&activeThreadsMutex);
+			// activeThreads--;
+			// pthread_mutex_unlock(&activeThreadsMutex);
+
+		// 	if (activeThreads == 0 && numJobs == 0) break;
+		// }
 	}
+
+	printf("Worker %d done\n", *((int*) id));
 
 	return NULL;
 }
 
-void initializeWorkers(unsigned int threadsNumber) {
-	(void) threadsNumber;
+void initializeWorkers(unsigned int threadsNumber, pthread_t threads[]) {
 	// This could be you initializer function to do all the pthread related stuff.
+	for (int i = 0; i < threadsNumber; ++i) {
+		pthread_t thread;
+		int* threadNum = malloc(sizeof(int));
+		*threadNum = i;
+		int res = pthread_create(&thread, NULL, worker, threadNum);
+		char threadName[10];
+		snprintf(threadName, 10, "worker_%d", i);
+		pthread_setname_np(thread, threadName);
+		threads[i] = thread;
+		printf("Created thread: %d\n", res);
+	}
 }
 
 
@@ -172,6 +220,14 @@ void help(char const *exec, char const opt, char const *optarg) {
 
 int main( int argc, char *argv[] )
 {
+	char cwd[PATH_MAX];
+	if (getcwd(cwd, sizeof(cwd)) != NULL) {
+		printf("HEY HO LETS GO Current working dir: %s\n", cwd);
+	} else {
+		perror("getcwd() error");
+		return 1;
+	}
+
 	int ret = 0;
 	/* Standard Values */
 	char *output = NULL; //output image filepath
@@ -308,7 +364,15 @@ int main( int argc, char *argv[] )
 		// Calculate a dividable resolution for the blockSize:
 		unsigned int const correctedBlockSize = pow(subdivisions,numDiv) * blockDim;
 		// Mariani-Silver subdivision algorithm
-		marianiSilver(dwellBuffer, 0, 0, correctedBlockSize);
+		// marianiSilver(dwellBuffer, 0, 0, correctedBlockSize);
+		createJob(NULL, dwellBuffer, 0, 0, correctedBlockSize);
+
+		pthread_t threads[useThreads];
+		initializeWorkers(useThreads, threads);
+
+		for (int i = 0; i < useThreads; ++i) {
+			pthread_join(threads[i], NULL);
+		}
 	} else {
 		// Traditional Mandelbrot-Set computation or the 'Escape Time' algorithm
 		// computeBlock respects the resolution of the image, so we scale the blocks up to

@@ -5,15 +5,12 @@
     "tasks": [
         {
             "type": "shell",
-            "label": "Make: build",
-            "command": "make",
+            "label": "Build ass. 5 pthread",
+            "command": "make all",
             "options": {
-                "cwd": "${fileDirname}"
+                "cwd": "${workspaceFolder}/assignment5/pthread"
             },
-            "group": {
-                "kind": "build",
-                "isDefault": true
-            }
+            "group": "build"
         }
     ]
 }

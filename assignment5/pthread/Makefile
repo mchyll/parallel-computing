@@ -1,6 +1,6 @@
 RES := 8192
 OUTPUT := output/mandel.bmp
-OPTIMIZATION := 3
+OPTIMIZATION := 0
 
 X=0.5
 Y=0.5
@@ -20,11 +20,11 @@ endif
 SOURCE_DIR := src
 BUILD_DIR  := mandel
 BINARY := $(BUILD_DIR)/mandel
-OPTIMIZATION := 3
+OPTIMIZATION := 0
 
 CC := g++
 CC := gcc
-FLAGS := 
+FLAGS := -g
 CCFLAGS := -Wall -Wextra -Wpedantic -O$(OPTIMIZATION) $(FLAGS)
 LINKING := -lpthread -lm -lrt
 

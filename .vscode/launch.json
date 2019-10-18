@@ -5,30 +5,16 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "(gdb) Launch",
+            "name": "Ass. 5 pthread",
             "type": "cppdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/assignment3/test",
-            "args": [],
+            "preLaunchTask": "Build ass. 5 pthread",
+            "program": "${workspaceFolder}/assignment5/pthread/mandel/mandel",
+            "args": ["-ooutput/mandel.bmp", "-r2048", "-x0.5", "-y0.5", "-s1.0", "-p4", "-c1", "-i512", "-m"],
             "stopAtEntry": false,
-            "cwd": "${workspaceFolder}",
+            "cwd": "${workspaceFolder}/assignment5/pthread",
             "environment": [],
             "externalConsole": false,
-            "MIMode": "gdb",
-            "setupCommands": [
-                {
-                    "description": "Enable pretty-printing for gdb",
-                    "text": "-enable-pretty-printing",
-                    "ignoreFailures": true
-                }
-            ]
-        },
-        {
-            "name": "(gdb) Attach",
-            "type": "cppdbg",
-            "request": "attach",
-            "program": "${workspaceFolder}/assignment3/main",
-            "processId": "${command:pickProcess}",
             "MIMode": "gdb",
             "setupCommands": [
                 {
