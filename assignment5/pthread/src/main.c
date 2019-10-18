@@ -63,6 +63,8 @@ job popJob (jobQueue **head) {
 }
 
 jobQueue *jobQueueHead = NULL;
+int activeThreads;
+int numJobs;
 
 void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int const, unsigned int const),
 			   dwellType *buffer,
@@ -77,6 +79,17 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 void *worker(void *id) {
 	(void) id;
 	// This could be your pthread function
+
+	while (true) {
+		if (numJobs > 0) {
+			activeThreads++;
+			job j = popJob(jobQueueHead);
+			marianiSilver(j.dwellBuffer, j.atX, j.atY, j.blockSize);
+			activeThreads--;
+			if (activeThreads == 0) break;
+		}
+	}
+
 	return NULL;
 }
 
@@ -115,7 +128,7 @@ void marianiSilver( dwellType *buffer,
 		unsigned int newBlockSize = blockSize / subdivisions;
 		for (unsigned int ydiv = 0; ydiv < subdivisions; ydiv++) {
 			for (unsigned int xdiv = 0; xdiv < subdivisions; xdiv++) {
-				marianiSilver(buffer, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize), newBlockSize);
+				createJob(NULL, buffer, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize), newBlockSize);
 			}
 		}
 	}
