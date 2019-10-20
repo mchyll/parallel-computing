@@ -1,7 +1,7 @@
 
 
 CC=gcc
-FLAGS := -O0 -g
+FLAGS := -O3
 LINKING := -lblas -fopenmp
 
 
