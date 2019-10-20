@@ -48,8 +48,8 @@ void marianiSilver( dwellType *buffer,
 
 // On Error jobQueue will be freed and the application should exit
 void putJob (jobQueue **head, job newJob) {
-	printf("Putting a job\n");
-	pthread_mutex_lock(&jobsMutex);
+	// printf("Putting a job\n");
+	// pthread_mutex_lock(&jobsMutex);
 	jobQueue *new = malloc(sizeof(jobQueue));
 	if (new != NULL) {
 		new->item = newJob;
@@ -64,7 +64,7 @@ void putJob (jobQueue **head, job newJob) {
 		}
 	}
 	numJobs++;
-	pthread_mutex_unlock(&jobsMutex);
+	// pthread_mutex_unlock(&jobsMutex);
 }
 
 // Only allowed to be called if something is in the job queue!
@@ -79,12 +79,14 @@ job popJob (jobQueue **head) {
 	return poppedJob;
 }
 
-int hasJobs() {
+int running() {
+	pthread_mutex_lock(&activeThreadsMutex);
 	pthread_mutex_lock(&jobsMutex);
-	int num = numJobs;
+	int result = numJobs + activeThreads;
 	pthread_mutex_unlock(&jobsMutex);
-	sleep(1);
-	return num;
+	pthread_mutex_unlock(&activeThreadsMutex);
+	// sleep(1);
+	return result;
 }
 
 void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int const, unsigned int const),
@@ -98,32 +100,32 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 }
 
 void *worker(void *id) {
-	printf("Worker %d started\n", *((int*) id));
+	int threadId = *((int*) id);
+	if (threadId > 0) sleep(1);
+	printf("Worker %d started\n", threadId);
 	// This could be your pthread function
 
-	while (hasJobs()) {
-		// if (numJobs > 0) {
-			// pthread_mutex_lock(&activeThreadsMutex);
-			// activeThreads++;
-			// pthread_mutex_unlock(&activeThreadsMutex);
+	while (running()) {
+		pthread_mutex_lock(&jobsMutex);
+		if (numJobs == 0) {
+			pthread_mutex_unlock(&jobsMutex);
+		}
+		else {
+			job j = popJob(&jobQueueHead);
+			pthread_mutex_unlock(&jobsMutex);
 
-			pthread_mutex_lock(&jobsMutex);
-			if (numJobs == 0) {
-				pthread_mutex_unlock(&jobsMutex);
-			}
-			else {
-				job j = popJob(&jobQueueHead);
-				pthread_mutex_unlock(&jobsMutex);
+			pthread_mutex_lock(&activeThreadsMutex);
+			activeThreads++;
+			pthread_mutex_unlock(&activeThreadsMutex);
 
-				printf("Worker %d got a job\n", *((int*) id));
-				marianiSilver(j.dwellBuffer, j.atX, j.atY, j.blockSize);
-			}
-			// pthread_mutex_lock(&activeThreadsMutex);
-			// activeThreads--;
-			// pthread_mutex_unlock(&activeThreadsMutex);
+			if (threadId == 0 && numJobs == 0) sleep(2);
+			// printf("Worker %d got a job\n", *((int*) id));
+			marianiSilver(j.dwellBuffer, j.atY, j.atX, j.blockSize);
 
-		// 	if (activeThreads == 0 && numJobs == 0) break;
-		// }
+			pthread_mutex_lock(&activeThreadsMutex);
+			activeThreads--;
+			pthread_mutex_unlock(&activeThreadsMutex);
+		}
 	}
 
 	printf("Worker %d done\n", *((int*) id));
@@ -142,7 +144,6 @@ void initializeWorkers(unsigned int threadsNumber, pthread_t threads[]) {
 		snprintf(threadName, 10, "worker_%d", i);
 		pthread_setname_np(thread, threadName);
 		threads[i] = thread;
-		printf("Created thread: %d\n", res);
 	}
 }
 
@@ -164,18 +165,22 @@ void marianiSilver( dwellType *buffer,
 {
 	dwellType dwell = commonBorder(buffer, atY, atX, blockSize);
 	if ( dwell != dwellUncomputed ) {
+		// printf("Filling block at %d %d\n", atX, atY);
 		fillBlock(buffer, dwell, atY, atX, blockSize);
 		if (markBorders)
 			markBorder(buffer, dwellBorderFill, atY, atX, blockSize);
 	} else if (blockSize <= blockDim) {
+		// printf("Computing block at %d %d\n", atX, atY);
 		computeBlock(buffer, atY, atX, blockSize);
 		if (markBorders)
 			markBorder(buffer, dwellBorderCompute, atY, atX, blockSize);
 	} else {
+		// printf("Subdividing block into %d blocks\n", subdivisions * subdivisions);
 		// Subdivision
 		unsigned int newBlockSize = blockSize / subdivisions;
 		for (unsigned int ydiv = 0; ydiv < subdivisions; ydiv++) {
 			for (unsigned int xdiv = 0; xdiv < subdivisions; xdiv++) {
+				// printf("Adding block size %d at %d %d into queue\n", newBlockSize, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize));
 				createJob(NULL, buffer, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize), newBlockSize);
 			}
 		}
