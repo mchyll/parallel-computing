@@ -6,9 +6,11 @@ Y=0.5
 S=1.0
 I=512
 COLOUR=1
-THREADS=2
+THREADS=3
 BLOCKDIM=16
 SUBDIV=4
+MARK=1
+TRADITIONAL=0
 ARGUMENTS := -o $(OUTPUT) -r $(RES) -x $(X) -y $(Y) -s $(S) -p $(THREADS) -c $(COLOUR) -i $(I) -b $(BLOCKDIM) -d $(SUBDIV)
 
 ifeq ($(MARK),1)

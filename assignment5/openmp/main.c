@@ -6,6 +6,8 @@
 #include <stdbool.h>
 #include <omp.h>
 #include <cblas.h>
+#include <time.h>
+#include <math.h>
 
 //Threshold for testing validity of matrix matrix multiplication
 #define ERROR_THRESHOLD 0.0001
@@ -29,12 +31,35 @@ void serial_mxm(const double *A, const double *B, double *C, int m, int n, int k
 
 void omp_mxm(double *A, double *B, double *C, int m, int n, int k)
 {
-  printf("OpenMP version not implemented yet!\n");
+  // Get number of threads which omp uses
+  int numThreads;
+  #pragma omp parallel
+  numThreads = omp_get_num_threads();
+  printf("OpenMP - num threads running: %d\n", numThreads);
+
+  start = omp_get_wtime();
+  #pragma omp parallel for collapse(2)
+  for (int i = 0; i < m; i++) {
+    for (int j = 0; j < n; j++) {
+      C[i*n + j] = 0;
+      for (int l = 0; l < k; l++) {
+        C[i*n + j] += A[i*k + l] * B[l*n + j];
+      }
+    }
+  }
+  end = omp_get_wtime();
 }
 
 void blas_mxm(double *A, double *B, double *C, int m, int n, int k)
 {
-  printf("BLAS version not implemented yet!\n");
+  struct timespec time;
+  clock_gettime(CLOCK_REALTIME, &time);
+  start = time.tv_sec + (double)time.tv_nsec / 1e9;
+
+  cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasNoTrans, m, n, k, 1.0, A, k, B, n, 1.0, C, n);
+
+  clock_gettime(CLOCK_REALTIME, &time);
+  end = time.tv_sec + (double)time.tv_nsec / 1e9;
 }
 
 int main(const unsigned int argc, char **argv)
@@ -73,15 +98,28 @@ int main(const unsigned int argc, char **argv)
   }
 
   switch (input) {
-    case 's':
+    case 's': 
+    {
+      struct timespec time;
+      clock_gettime(CLOCK_REALTIME, &time);
+      start = time.tv_sec + (double)time.tv_nsec / 1e9;
+
       serial_mxm(A, B, C, m, n, k);
+
+      clock_gettime(CLOCK_REALTIME, &time);
+      end = time.tv_sec + (double)time.tv_nsec / 1e9;
+    }
       break;
+
     case 'o':
       omp_mxm(A, B, C, m, n, k);
       break;
+
     case 'b':
+      printf("Blas lets go\n");
       blas_mxm(A, B, C, m, n, k);
       break;
+
     default:
       printf("Please provide version:\n");
       printf("\ts(serial),\n");
@@ -119,7 +157,7 @@ int main(const unsigned int argc, char **argv)
     serial_mxm(A, B, C2, m, n, k);
     bool correct = true;
     for (int i = 0; i < (m*n); i++) {
-      if (abs(C[i] - C2[i]) > ERROR_THRESHOLD) {
+      if (fabs(C[i] - C2[i]) > ERROR_THRESHOLD) {
         correct = false;
       }
     }

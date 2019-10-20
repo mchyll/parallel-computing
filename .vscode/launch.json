@@ -23,6 +23,26 @@
                     "ignoreFailures": true
                 }
             ]
+        },
+        {
+            "name": "Debug ass. 5 openmp",
+            "type": "cppdbg",
+            "request": "launch",
+            "preLaunchTask": "Build ass. 5 openmp",
+            "program": "${workspaceFolder}/assignment5/openmp/main",
+            "args": ["b", "t"],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/assignment5/openmp",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
         }
     ]
 }

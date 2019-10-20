@@ -19,7 +19,19 @@
             "options": {
                 "cwd": "${workspaceFolder}/assignment5/pthread"
             },
-            "group": "test"
+            "group": {
+                "kind": "test",
+                "isDefault": true
+            }
+        },
+        {
+            "type": "shell",
+            "label": "Build ass. 5 openmp",
+            "command": "make",
+            "options": {
+                "cwd": "${workspaceFolder}/assignment5/openmp"
+            },
+            "group": "build"
         }
     ]
 }
