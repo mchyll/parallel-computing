@@ -6,7 +6,7 @@ Y=0.5
 S=1.0
 I=512
 COLOUR=1
-THREADS=3
+THREADS=4
 BLOCKDIM=16
 SUBDIV=4
 MARK=1
@@ -26,8 +26,8 @@ BINARY := $(BUILD_DIR)/mandel
 
 CC := g++
 CC := gcc
-FLAGS := -g
-OPTIMIZATION := 0
+FLAGS :=
+OPTIMIZATION := 3
 CCFLAGS := -Wall -Wextra -Wpedantic -O$(OPTIMIZATION) $(FLAGS)
 LINKING := -lpthread -lm -lrt
 

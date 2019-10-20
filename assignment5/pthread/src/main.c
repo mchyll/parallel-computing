@@ -1,3 +1,7 @@
+/*
+PARALLEL COMPUTING - ASSIGNMENT 5
+Magnus Conrad Hyll
+*/
 
 #include <getopt.h>
 #include <stdio.h>
@@ -38,10 +42,6 @@ typedef struct jobQueue {
 jobQueue *jobQueueHead = NULL;
 bool useMarianiSilver;
 
-pthread_mutex_t activeThreadsMutex = PTHREAD_MUTEX_INITIALIZER;
-pthread_cond_t activeThreadsCond = PTHREAD_COND_INITIALIZER;
-int activeThreads = 0;
-
 pthread_mutex_t jobsMutex = PTHREAD_MUTEX_INITIALIZER;
 pthread_cond_t jobsCond = PTHREAD_COND_INITIALIZER;
 int numJobs = 0;
@@ -49,13 +49,11 @@ int numJobs = 0;
 void marianiSilver( dwellType *buffer,
 					unsigned int const atY,
 					unsigned int const atX,
-					unsigned int const blockSize, int* fillCounter, int* computeCounter, int* subdivCounter);
+					unsigned int const blockSize);
 
 // On Error jobQueue will be freed and the application should exit
 // This function is not thread safe!
 void putJob (jobQueue **head, job newJob) {
-	// printf("Putting a job\n");
-	// pthread_mutex_lock(&jobsMutex);
 	jobQueue *new = malloc(sizeof(jobQueue));
 	if (new != NULL) {
 		new->item = newJob;
@@ -70,30 +68,17 @@ void putJob (jobQueue **head, job newJob) {
 		}
 	}
 	numJobs++;
-	// pthread_mutex_unlock(&jobsMutex);
 }
 
 // Only allowed to be called if something is in the job queue!
 // This function is not thread safe!
 job popJob (jobQueue **head) {
-	// pthread_mutex_lock(&jobsMutex);
 	jobQueue *current = *head;
 	job poppedJob = current->item;
 	(*head) = current->next;
 	free(current);
 	numJobs--;
-	// pthread_mutex_unlock(&jobsMutex);
 	return poppedJob;
-}
-
-int running() {
-	pthread_mutex_lock(&activeThreadsMutex);
-	pthread_mutex_lock(&jobsMutex);
-	int result = numJobs + activeThreads;
-	pthread_mutex_unlock(&jobsMutex);
-	pthread_mutex_unlock(&activeThreadsMutex);
-	// sleep(1);
-	return result;
 }
 
 void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int const, unsigned int const),
@@ -108,57 +93,32 @@ void createJob(void (*callback)(dwellType *, unsigned int const, unsigned int co
 
 void *worker(void *id) {
 	int threadId = *((int*) id);
-	// if (threadId > 0) sleep(1);
 	printf("Worker %d started\n", threadId);
-
-	int jobsIveDone = 0;
-	int fill = 0, compute = 0, subdiv = 0;
 
 	while (1) {
 		pthread_mutex_lock(&jobsMutex);
 		// Check if we're out of jobs
 		while (!numJobs) {
-			// Check if other threads are running, which may produce new jobs.
-			// If not, and we're out of jobs, we are done
-			// pthread_mutex_lock(&activeThreadsMutex);
-			// if (!activeThreads) {
-			// 	pthread_mutex_unlock(&activeThreadsMutex);
-			// 	pthread_mutex_unlock(&jobsMutex);
-			// 	break;
-			// }
-			// pthread_mutex_unlock(&activeThreadsMutex);
-
-			// Wait for signal when job is added
-			printf("Thread %d waiting for job signal\n", threadId);
 			pthread_cond_wait(&jobsCond, &jobsMutex);
-			printf("Thread %d got job signal\n", threadId);
 		}
 		job j = popJob(&jobQueueHead);
-		// pthread_mutex_lock(&activeThreadsMutex);
-		// ++activeThreads;
-		// pthread_mutex_unlock(&activeThreadsMutex);
 		pthread_mutex_unlock(&jobsMutex);
 
-		// if (threadId == 0 && numJobs == 0) sleep(2);
-		// printf("Worker %d got a job\n", *((int*) id));
 		if (useMarianiSilver) {
-			marianiSilver(j.dwellBuffer, j.atY, j.atX, j.blockSize, &fill, &compute, &subdiv);
+			marianiSilver(j.dwellBuffer, j.atY, j.atX, j.blockSize);
 		} else {
 			escapeTime(j.dwellBuffer, j.atY, j.atX, j.blockSize);
 		}
-		jobsIveDone++;
 
+		// Check if there are jobs left. If not, quit
 		pthread_mutex_lock(&jobsMutex);
-		// pthread_mutex_lock(&activeThreadsMutex);
-		// int keepRunning = --activeThreads + numJobs;
 		int keepRunning = numJobs;
-		// pthread_mutex_unlock(&activeThreadsMutex);
 		pthread_mutex_unlock(&jobsMutex);
 
 		if (!keepRunning) break;
 	}
 
-	printf("Worker %d done, processed %d jobs (%d fill, %d compute, %d subdiv)\n", threadId, jobsIveDone, fill, compute, subdiv);
+	printf("Worker %d done\n", threadId);
 
 	return NULL;
 }
@@ -191,30 +151,23 @@ unsigned int subdivisions;
 void marianiSilver( dwellType *buffer,
 					unsigned int const atY,
 					unsigned int const atX,
-					unsigned int const blockSize, int* fillCounter, int* computeCounter, int* subdivCounter)
+					unsigned int const blockSize)
 {
 	dwellType dwell = commonBorder(buffer, atY, atX, blockSize);
 	if ( dwell != dwellUncomputed ) {
-		// printf("Filling block at %d %d\n", atX, atY);
 		fillBlock(buffer, dwell, atY, atX, blockSize);
-		(*fillCounter)++;
 		if (markBorders)
 			markBorder(buffer, dwellBorderFill, atY, atX, blockSize);
 	} else if (blockSize <= blockDim) {
-		// printf("Computing block at %d %d\n", atX, atY);
 		computeBlock(buffer, atY, atX, blockSize);
-		(*computeCounter)++;
 		if (markBorders)
 			markBorder(buffer, dwellBorderCompute, atY, atX, blockSize);
 	} else {
-		// printf("Subdividing block into %d blocks\n", subdivisions * subdivisions);
 		// Subdivision
-		(*subdivCounter)++;
 		unsigned int newBlockSize = blockSize / subdivisions;
 		pthread_mutex_lock(&jobsMutex);
 		for (unsigned int ydiv = 0; ydiv < subdivisions; ydiv++) {
 			for (unsigned int xdiv = 0; xdiv < subdivisions; xdiv++) {
-				// printf("Adding block size %d at %d %d into queue\n", newBlockSize, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize));
 				createJob(NULL, buffer, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize), newBlockSize);
 			}
 		}
@@ -261,14 +214,6 @@ void help(char const *exec, char const opt, char const *optarg) {
 
 int main( int argc, char *argv[] )
 {
-	// char cwd[PATH_MAX];
-	// if (getcwd(cwd, sizeof(cwd)) != NULL) {
-	// 	printf("HEY HO LETS GO Current working dir: %s\n", cwd);
-	// } else {
-	// 	perror("getcwd() error");
-	// 	return 1;
-	// }
-
 	int ret = 0;
 	/* Standard Values */
 	char *output = NULL; //output image filepath
@@ -399,7 +344,6 @@ int main( int argc, char *argv[] )
 		dwellBuffer[i] = dwellUncomputed;
 	}
 
-	printf("Creating initial jobs\n");
 	if (useMarianiSilver) {
 		// Scale the blockSize from res up to a subdividable value
 		// Number of possible subdivisions:

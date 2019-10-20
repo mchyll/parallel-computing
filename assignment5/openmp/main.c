@@ -1,3 +1,8 @@
+/*
+PARALLEL COMPUTING - ASSIGNMENT 5
+Magnus Conrad Hyll
+*/
+
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
