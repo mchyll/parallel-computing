@@ -11,6 +11,15 @@
                 "cwd": "${workspaceFolder}/assignment5/pthread"
             },
             "group": "build"
+        },
+        {
+            "type": "shell",
+            "label": "Run and time ass. 5 pthread",
+            "command": "make time",
+            "options": {
+                "cwd": "${workspaceFolder}/assignment5/pthread"
+            },
+            "group": "test"
         }
     ]
 }

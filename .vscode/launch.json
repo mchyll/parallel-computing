@@ -5,12 +5,12 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Ass. 5 pthread",
+            "name": "Debug ass. 5 pthread",
             "type": "cppdbg",
             "request": "launch",
             "preLaunchTask": "Build ass. 5 pthread",
             "program": "${workspaceFolder}/assignment5/pthread/mandel/mandel",
-            "args": ["-ooutput/mandel.bmp", "-r8192", "-x0.5", "-y0.5", "-s1.0", "-p4", "-c1", "-i512", "-m"],
+            "args": ["-ooutput/mandel.bmp", "-r2048", "-x0.5", "-y0.5", "-s1.0", "-p4", "-c1", "-i512", "-m"],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/assignment5/pthread",
             "environment": [],

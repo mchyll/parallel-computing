@@ -1,14 +1,15 @@
 RES := 8192
 OUTPUT := output/mandel.bmp
-OPTIMIZATION := 0
 
 X=0.5
 Y=0.5
 S=1.0
 I=512
 COLOUR=1
-THREADS=4
-ARGUMENTS := -o $(OUTPUT) -r $(RES) -x $(X) -y $(Y) -s $(S) -p $(THREADS) -c $(COLOUR) -i $(I)
+THREADS=2
+BLOCKDIM=16
+SUBDIV=4
+ARGUMENTS := -o $(OUTPUT) -r $(RES) -x $(X) -y $(Y) -s $(S) -p $(THREADS) -c $(COLOUR) -i $(I) -b $(BLOCKDIM) -d $(SUBDIV)
 
 ifeq ($(MARK),1)
 	ARGUMENTS := $(ARGUMENTS) -m
@@ -20,11 +21,11 @@ endif
 SOURCE_DIR := src
 BUILD_DIR  := mandel
 BINARY := $(BUILD_DIR)/mandel
-OPTIMIZATION := 0
 
 CC := g++
 CC := gcc
 FLAGS := -g
+OPTIMIZATION := 0
 CCFLAGS := -Wall -Wextra -Wpedantic -O$(OPTIMIZATION) $(FLAGS)
 LINKING := -lpthread -lm -lrt
 

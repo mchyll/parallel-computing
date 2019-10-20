@@ -36,9 +36,14 @@ typedef struct jobQueue {
 } jobQueue;
 
 jobQueue *jobQueueHead = NULL;
+bool useMarianiSilver;
+
 pthread_mutex_t activeThreadsMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t activeThreadsCond = PTHREAD_COND_INITIALIZER;
 int activeThreads = 0;
+
 pthread_mutex_t jobsMutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t jobsCond = PTHREAD_COND_INITIALIZER;
 int numJobs = 0;
 
 void marianiSilver( dwellType *buffer,
@@ -47,6 +52,7 @@ void marianiSilver( dwellType *buffer,
 					unsigned int const blockSize);
 
 // On Error jobQueue will be freed and the application should exit
+// This function is not thread safe!
 void putJob (jobQueue **head, job newJob) {
 	// printf("Putting a job\n");
 	// pthread_mutex_lock(&jobsMutex);
@@ -68,6 +74,7 @@ void putJob (jobQueue **head, job newJob) {
 }
 
 // Only allowed to be called if something is in the job queue!
+// This function is not thread safe!
 job popJob (jobQueue **head) {
 	// pthread_mutex_lock(&jobsMutex);
 	jobQueue *current = *head;
@@ -103,32 +110,55 @@ void *worker(void *id) {
 	int threadId = *((int*) id);
 	if (threadId > 0) sleep(1);
 	printf("Worker %d started\n", threadId);
-	// This could be your pthread function
 
-	while (running()) {
+	int jobsIveDone = 0;
+
+	while (1) {
 		pthread_mutex_lock(&jobsMutex);
 		if (numJobs == 0) {
-			pthread_mutex_unlock(&jobsMutex);
+			// printf("Thread %d waiting for job signal\n", threadId);
+			// pthread_cond_wait(&jobsCond, &jobsMutex);
+			// If there are no jobs, check if other threads are working and may produce new jobs
+			pthread_mutex_lock(&activeThreadsMutex);
+			if (activeThreads == 0) {
+			// if (__sync_fetch_and_add(&activeThreads, 0) == 0) {
+				// Neither jobs nor active threads means we're done
+				pthread_mutex_unlock(&activeThreadsMutex);
+				pthread_mutex_unlock(&jobsMutex);
+				break;
+			}
+			else {
+				// Other threads are working, keep waiting for new jobs
+				pthread_mutex_unlock(&activeThreadsMutex);
+				pthread_mutex_unlock(&jobsMutex);
+			}
 		}
 		else {
 			job j = popJob(&jobQueueHead);
 			pthread_mutex_unlock(&jobsMutex);
 
-			pthread_mutex_lock(&activeThreadsMutex);
-			activeThreads++;
-			pthread_mutex_unlock(&activeThreadsMutex);
+			// pthread_mutex_lock(&activeThreadsMutex);
+			// activeThreads++;
+			__sync_add_and_fetch(&activeThreads, 1);
+			// pthread_mutex_unlock(&activeThreadsMutex);
 
 			if (threadId == 0 && numJobs == 0) sleep(2);
 			// printf("Worker %d got a job\n", *((int*) id));
-			marianiSilver(j.dwellBuffer, j.atY, j.atX, j.blockSize);
+			if (useMarianiSilver) {
+				marianiSilver(j.dwellBuffer, j.atY, j.atX, j.blockSize);
+			} else {
+				escapeTime(j.dwellBuffer, j.atY, j.atX, j.blockSize);
+			}
+			jobsIveDone++;
 
-			pthread_mutex_lock(&activeThreadsMutex);
-			activeThreads--;
-			pthread_mutex_unlock(&activeThreadsMutex);
+			// pthread_mutex_lock(&activeThreadsMutex);
+			// activeThreads--;
+			__sync_add_and_fetch(&activeThreads, -1);
+			// pthread_mutex_unlock(&activeThreadsMutex);
 		}
 	}
 
-	printf("Worker %d done\n", *((int*) id));
+	printf("Worker %d done, processed %d jobs\n", threadId, jobsIveDone);
 
 	return NULL;
 }
@@ -181,7 +211,10 @@ void marianiSilver( dwellType *buffer,
 		for (unsigned int ydiv = 0; ydiv < subdivisions; ydiv++) {
 			for (unsigned int xdiv = 0; xdiv < subdivisions; xdiv++) {
 				// printf("Adding block size %d at %d %d into queue\n", newBlockSize, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize));
+				pthread_mutex_lock(&jobsMutex);
 				createJob(NULL, buffer, atY + (ydiv * newBlockSize), atX + (xdiv * newBlockSize), newBlockSize);
+				// pthread_cond_signal(&jobsCond);
+				pthread_mutex_unlock(&jobsMutex);
 			}
 		}
 	}
@@ -225,13 +258,13 @@ void help(char const *exec, char const opt, char const *optarg) {
 
 int main( int argc, char *argv[] )
 {
-	char cwd[PATH_MAX];
-	if (getcwd(cwd, sizeof(cwd)) != NULL) {
-		printf("HEY HO LETS GO Current working dir: %s\n", cwd);
-	} else {
-		perror("getcwd() error");
-		return 1;
-	}
+	// char cwd[PATH_MAX];
+	// if (getcwd(cwd, sizeof(cwd)) != NULL) {
+	// 	printf("HEY HO LETS GO Current working dir: %s\n", cwd);
+	// } else {
+	// 	perror("getcwd() error");
+	// 	return 1;
+	// }
 
 	int ret = 0;
 	/* Standard Values */
@@ -241,8 +274,9 @@ int main( int argc, char *argv[] )
 	double scale = 1; // scaling factor
 	unsigned int colourIterations = 1; //how many times the colour gradient is repeated
 	bool quiet = false; //output something or not
-	bool useMarianiSilver = true;
+	useMarianiSilver = true;
 	unsigned int useThreads = 4;
+	pthread_t threads[useThreads];
 
 	resolution = 1024;
 	maxDwell = 512;
@@ -371,13 +405,6 @@ int main( int argc, char *argv[] )
 		// Mariani-Silver subdivision algorithm
 		// marianiSilver(dwellBuffer, 0, 0, correctedBlockSize);
 		createJob(NULL, dwellBuffer, 0, 0, correctedBlockSize);
-
-		pthread_t threads[useThreads];
-		initializeWorkers(useThreads, threads);
-
-		for (int i = 0; i < useThreads; ++i) {
-			pthread_join(threads[i], NULL);
-		}
 	} else {
 		// Traditional Mandelbrot-Set computation or the 'Escape Time' algorithm
 		// computeBlock respects the resolution of the image, so we scale the blocks up to
@@ -386,9 +413,18 @@ int main( int argc, char *argv[] )
 
 		for (unsigned int t = 0; t < useThreads; t++) {
 			for (unsigned int x = 0; x < useThreads; x++) {
-				escapeTime(dwellBuffer, t * block, x * block, block);
+				// escapeTime(dwellBuffer, t * block, x * block, block);
+				createJob(NULL, dwellBuffer, t * block, x * block, block);
 			}
 		}
+	}
+
+	// Start threads
+	initializeWorkers(useThreads, threads);
+
+	// Wait for threads to complete
+	for (int i = 0; i < useThreads; ++i) {
+		pthread_join(threads[i], NULL);
 	}
 
 	// Map dwell buffer to image
