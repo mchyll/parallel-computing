@@ -12,3 +12,5 @@ mandel/
 output/
 .mandelnav
 assignment5/pthread/src/test
+
+assignment6/mandel

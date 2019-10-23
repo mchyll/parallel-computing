@@ -2,6 +2,8 @@
 #include <stdlib.h>
 #include <math.h>
 #include <sys/time.h>
+// #include <cuda_runtime_api.h>
+// #include "/usr/local/cuda-10.1/targets/x86_64-linux/include/cuda_runtime_api.h"
 
 /* Problem size */
 #define XSIZE 2560
@@ -13,24 +15,41 @@
 
 #define MAXITER 255
 
-double xleft=-2.01;
-double xright=1;
-double yupper,ylower;
-double ycenter=1e-6;
+double xleft = -2.01;
+double xright = 1;
+double yupper, ylower;
+double ycenter = 1e-6;
 double step;
 
 int host_pixel[XSIZE*YSIZE];
 int device_pixel[XSIZE*YSIZE];
 
 typedef struct {
-	double real,imag;
+	double real, imag;
 } my_complex_t;
 
 #define PIXEL(i,j) ((i)+(j)*XSIZE)
 
 /********** SUBTASK1: Create kernel device_calculate *************************/
 
-//Insert code here
+__global__ void device_calculate(int* device_pixel, int xLeft, int yUpper, int step) {
+	/* Calculate the number of iterations until divergence for each pixel.
+		If divergence never happens, return MAXITER */
+	my_complex_t c, z, temp;
+	int iter = 0;
+	int i = threadIdx.x + blockIdx.x * blockDim.x ; // x
+	int j = threadIdx.y + blockIdx.y * blockDim.y ; // y
+	c.real = xLeft + step * i;
+	c.imag = yUpper - step * j;
+	z = c;
+	while (z.real*z.real + z.imag*z.imag < 4.0) {
+		temp.real = z.real*z.real - z.imag*z.imag + c.real;
+		temp.imag = 2.0*z.real*z.imag + c.imag;
+		z = temp;
+		if (++iter == MAXITER) break;
+	}
+	device_pixel[PIXEL(i,j)] = iter;
+}
 
 /********** SUBTASK1 END *****************************************************/
 
