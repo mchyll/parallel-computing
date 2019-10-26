@@ -1,3 +1,8 @@
+/*
+PARALLEL COMPUTING - ASSIGNMENT 6
+Magnus Conrad Hyll
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
