@@ -2,8 +2,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <sys/time.h>
-// #include <cuda_runtime_api.h>
-// #include "/usr/local/cuda-10.1/targets/x86_64-linux/include/cuda_runtime_api.h"
+#include <cuda_runtime_api.h>
 
 /* Problem size */
 #define XSIZE 2560
@@ -32,23 +31,29 @@ typedef struct {
 
 /********** SUBTASK1: Create kernel device_calculate *************************/
 
-__global__ void device_calculate(int* device_pixel, int xLeft, int yUpper, int step) {
+__global__ void device_calculate(int* pixels, double xLeft, double yUpper, double step) {
 	/* Calculate the number of iterations until divergence for each pixel.
 		If divergence never happens, return MAXITER */
+
 	my_complex_t c, z, temp;
 	int iter = 0;
-	int i = threadIdx.x + blockIdx.x * blockDim.x ; // x
-	int j = threadIdx.y + blockIdx.y * blockDim.y ; // y
-	c.real = xLeft + step * i;
-	c.imag = yUpper - step * j;
-	z = c;
-	while (z.real*z.real + z.imag*z.imag < 4.0) {
-		temp.real = z.real*z.real - z.imag*z.imag + c.real;
-		temp.imag = 2.0*z.real*z.imag + c.imag;
-		z = temp;
-		if (++iter == MAXITER) break;
+	int i = threadIdx.x + blockIdx.x * blockDim.x; // x coordinate of pixel
+	int j = threadIdx.y + blockIdx.y * blockDim.y; // y coordinate of pixel
+
+	if (i < XSIZE && j < YSIZE) {
+		c.real = xLeft + step * i;
+		c.imag = yUpper - step * j;
+		z = c;
+
+		while (z.real*z.real + z.imag*z.imag < 4.0) {
+			temp.real = z.real*z.real - z.imag*z.imag + c.real;
+			temp.imag = 2.0*z.real*z.imag + c.imag;
+			z = temp;
+			if (++iter == MAXITER) break;
+		}
+
+		pixels[PIXEL(i,j)] = iter;
 	}
-	device_pixel[PIXEL(i,j)] = iter;
 }
 
 /********** SUBTASK1 END *****************************************************/
@@ -140,32 +145,35 @@ int main(int argc,char **argv) {
 
 	/********** SUBTASK2: Set up device memory *******************************/
 
-	// Insert code here
+	int* cudaPixels;
+	cudaMalloc((void**) &cudaPixels, XSIZE * YSIZE * sizeof(int));
 
 	/********** SUBTASK2 END *************************************************/
 
 	start=walltime();
 	/********** SUBTASK3: Execute the kernel on the device *******************/
 
-	//Insert code here
+	dim3 gridDim = {XSIZE / BLOCKX, YSIZE / BLOCKY, 1};	// Grid consists of blocks
+	dim3 blockDim = {BLOCKX, BLOCKY, 1};				// Block consists of threads
+	device_calculate<<<gridDim, blockDim>>>(cudaPixels, xleft, yupper, step);
 
 	/********** SUBTASK3 END *************************************************/
-	
+
 	devicetime+=walltime()-start;
 
 	start=walltime();
-	
+
 	/********** SUBTASK4: Transfer the result from device to device_pixel[][]*/
 
-	//Insert code here
+	cudaMemcpy(device_pixel, cudaPixels, XSIZE * YSIZE * sizeof(int), cudaMemcpyDeviceToHost);
 
 	/********** SUBTASK4 END *************************************************/
-	
+
 	memtime+=walltime()-start;
 
 	/********** SUBTASK5: Free the device memory also ************************/
 
-	//Insert code here
+	cudaFree(cudaPixels);
 
 	/********** SUBTASK5 END *************************************************/
 
