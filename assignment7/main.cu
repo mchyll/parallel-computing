@@ -96,6 +96,32 @@ void applyFilter(unsigned char **out, unsigned char **in, unsigned int width, un
   }
 }
 
+// Apply convolutional filter on image data
+__global__ void cudaApplyFilter(unsigned char **out, unsigned char **in, unsigned int width, unsigned int height, int *filter, unsigned int filterDim, float filterFactor) {
+  unsigned int const filterCenter = (filterDim / 2);
+  int x = threadIdx.x + blockIdx.x * blockDim.x; // x coordinate of pixel
+  int y = threadIdx.y + blockIdx.y * blockDim.y; // y coordinate of pixel
+  // TODO check if point is within image
+  int aggregate = 0;
+  for (unsigned int ky = 0; ky < filterDim; ky++) {
+    int nky = filterDim - 1 - ky;
+    for (unsigned int kx = 0; kx < filterDim; kx++) {
+      int nkx = filterDim - 1 - kx;
+
+      int yy = y + (ky - filterCenter);
+      int xx = x + (kx - filterCenter);
+      if (xx >= 0 && xx < (int) width && yy >=0 && yy < (int) height)
+        aggregate += in[yy][xx] * filter[nky * filterDim + nkx];
+    }
+  }
+  aggregate *= filterFactor;
+  if (aggregate > 0) {
+    out[y][x] = (aggregate > 255) ? 255 : aggregate;
+  } else {
+    out[y][x] = 0;
+  }
+}
+
 
 void help(char const *exec, char const opt, char const *optarg) {
     FILE *out = stdout;
@@ -205,6 +231,10 @@ int main(int argc, char **argv) {
     return ERROR_EXIT;
   }
 
+  int* workingImage;
+  cudaMalloc((void**) &workingImage, imageChannel->width * imageChannel->height * sizeof(int));
+  int* prevImage;
+  cudaMalloc((void**) &prevImage, imageChannel->width * imageChannel->height * sizeof(int));
 
   //Here we do the actual computation!
   // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
