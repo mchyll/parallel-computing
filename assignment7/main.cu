@@ -8,12 +8,16 @@ Magnus Conrad Hyll
 #include <string.h>
 #include <getopt.h>
 #include <stdlib.h>
+#include <sys/time.h>
 extern "C" {
     #include "libs/bitmap.h"
 }
 #include <cuda_runtime_api.h>
 
 #define ERROR_EXIT -1
+
+#define BLOCK_WIDTH 8
+#define BLOCK_HEIGHT 8
 
 #define cudaErrorCheck(ans) { gpuAssert((ans), __FILE__, __LINE__); }
 inline void gpuAssert(cudaError_t code, const char *file, int line, bool abort=true)
@@ -70,7 +74,7 @@ float const gaussianFilterFactor = (float) 1.0 / 256.0;
 
 
 // Apply convolutional filter on image data
-void applyFilter(unsigned char **out, unsigned char **in, unsigned int width, unsigned int height, int *filter, unsigned int filterDim, float filterFactor) {
+void applyFilter(unsigned char **out, unsigned char **in, unsigned int width, unsigned int height, const int *filter, unsigned int filterDim, float filterFactor) {
   unsigned int const filterCenter = (filterDim / 2);
   for (unsigned int y = 0; y < height; y++) {
     for (unsigned int x = 0; x < width; x++) {
@@ -97,31 +101,87 @@ void applyFilter(unsigned char **out, unsigned char **in, unsigned int width, un
 }
 
 // Apply convolutional filter on image data
-__global__ void cudaApplyFilter(unsigned char **out, unsigned char **in, unsigned int width, unsigned int height, int *filter, unsigned int filterDim, float filterFactor) {
+__global__ void cudaApplyFilter(unsigned char *out, unsigned char *in, unsigned int width, unsigned int height, int *filter, unsigned int filterDim, float filterFactor) {
   unsigned int const filterCenter = (filterDim / 2);
-  int x = threadIdx.x + blockIdx.x * blockDim.x; // x coordinate of pixel
-  int y = threadIdx.y + blockIdx.y * blockDim.y; // y coordinate of pixel
-  // TODO check if point is within image
-  int aggregate = 0;
-  for (unsigned int ky = 0; ky < filterDim; ky++) {
-    int nky = filterDim - 1 - ky;
-    for (unsigned int kx = 0; kx < filterDim; kx++) {
-      int nkx = filterDim - 1 - kx;
+  int x = threadIdx.x + blockIdx.x * blockDim.x;  // x coordinate of pixel
+  int y = threadIdx.y + blockIdx.y * blockDim.y;  // y coordinate of pixel
 
-      int yy = y + (ky - filterCenter);
-      int xx = x + (kx - filterCenter);
-      if (xx >= 0 && xx < (int) width && yy >=0 && yy < (int) height)
-        aggregate += in[yy][xx] * filter[nky * filterDim + nkx];
+  // Check if point is within image
+  if (x < width && y < height) {
+    int aggregate = 0;
+    for (unsigned int ky = 0; ky < filterDim; ky++) {
+      int nky = filterDim - 1 - ky;
+      for (unsigned int kx = 0; kx < filterDim; kx++) {
+        int nkx = filterDim - 1 - kx;
+
+        int yy = y + (ky - filterCenter);
+        int xx = x + (kx - filterCenter);
+        if (xx >= 0 && xx < (int) width && yy >=0 && yy < (int) height)
+          aggregate += in[yy * width + xx] * filter[nky * filterDim + nkx];
+      }
     }
-  }
-  aggregate *= filterFactor;
-  if (aggregate > 0) {
-    out[y][x] = (aggregate > 255) ? 255 : aggregate;
-  } else {
-    out[y][x] = 0;
+    aggregate *= filterFactor;
+    if (aggregate > 0) {
+      out[y * width + x] = (aggregate > 255) ? 255 : aggregate;
+    } else {
+      out[y * width + x] = 0;
+    }
   }
 }
 
+// Apply convolutional filter on image data
+__global__ void cudaApplyFilterSharedMem(unsigned char *out, unsigned char *in, unsigned int width, unsigned int height, int *filter, unsigned int filterDim, float filterFactor) {
+  unsigned int const filterCenter = (filterDim / 2);
+  int x = threadIdx.x + blockIdx.x * blockDim.x;  // x coordinate of pixel
+  int y = threadIdx.y + blockIdx.y * blockDim.y;  // y coordinate of pixel
+
+  // The thread block cache containing part of the image
+  __shared__ unsigned char blockCache[BLOCK_WIDTH * BLOCK_HEIGHT];
+  // The filter, cached to shared memory. The size of this array is determined at kernel launch
+  extern __shared__ int filterCache[];
+
+  // Copy filter to shared memory
+  if (threadIdx.x < filterDim && threadIdx.y < filterDim)
+    filterCache[threadIdx.y * filterDim + threadIdx.x] = filter[threadIdx.y * filterDim + threadIdx.x];
+
+  // Copy image block to shared memory
+  if (x < width && y < height)
+    blockCache[threadIdx.y * blockDim.x + threadIdx.x] = in[y * width + x];
+
+  // Wait until all threads have finished copying to shared mem
+  __syncthreads();
+
+  // Check if point is within image
+  if (x < width && y < height) {
+    int aggregate = 0;
+    for (unsigned int ky = 0; ky < filterDim; ky++) {
+      int nky = filterDim - 1 - ky;
+      for (unsigned int kx = 0; kx < filterDim; kx++) {
+        int nkx = filterDim - 1 - kx;
+
+        // Check first if current pixel is within block cache
+        int block_x = threadIdx.x + (kx - filterCenter);
+        int block_y = threadIdx.y + (ky - filterCenter);
+        if (block_x >= 0 && block_x < BLOCK_WIDTH && block_y >= 0 && block_y < BLOCK_HEIGHT) {
+          aggregate += blockCache[block_y * BLOCK_WIDTH + block_x] * filterCache[nky * filterDim + nkx];
+        }
+        // If not, do the usual and read from global memory
+        else {
+          int yy = y + (ky - filterCenter);
+          int xx = x + (kx - filterCenter);
+          if (xx >= 0 && xx < (int) width && yy >=0 && yy < (int) height)
+            aggregate += in[yy * width + xx] * filterCache[nky * filterDim + nkx];
+        }
+      }
+    }
+    aggregate *= filterFactor;
+    if (aggregate > 0) {
+      out[y * width + x] = (aggregate > 255) ? 255 : aggregate;
+    } else {
+      out[y * width + x] = 0;
+    }
+  } 
+}
 
 void help(char const *exec, char const opt, char const *optarg) {
     FILE *out = stdout;
@@ -140,6 +200,72 @@ void help(char const *exec, char const opt, char const *optarg) {
 
     fprintf(out, "\n");
     fprintf(out, "Example: %s in.bmp out.bmp -i 10000\n", exec);
+}
+
+void runSerial(bmpImageChannel* imageChannel, int iterations, const int* filter, int filterDim, float filterFactor) {
+  //Here we do the actual computation!
+  // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
+  bmpImageChannel *processImageChannel = newBmpImageChannel(imageChannel->width, imageChannel->height);
+  for (unsigned int i = 0; i < iterations; i ++) {
+    applyFilter(processImageChannel->data,
+                imageChannel->data,
+                imageChannel->width,
+                imageChannel->height,
+                filter, filterDim, filterFactor);
+
+    // Swap the data pointers
+    unsigned char ** tmp = processImageChannel->data;
+    processImageChannel->data = imageChannel->data;
+    imageChannel->data = tmp;
+    unsigned char * tmp_raw = processImageChannel->rawdata;
+    processImageChannel->rawdata = imageChannel->rawdata;
+    imageChannel->rawdata = tmp_raw;
+  }
+  freeBmpImageChannel(processImageChannel);
+}
+
+void runCuda(bmpImageChannel* imageChannel, int iterations, const int* filter, int filterDim, float filterFactor) {
+  // Allocate memory for input image, output image and filter on GPU
+  unsigned char* inImage;
+  cudaErrorCheck(cudaMalloc((void**) &inImage, imageChannel->width * imageChannel->height * sizeof(int)));
+  unsigned char* outImage;
+  cudaErrorCheck(cudaMalloc((void**) &outImage, imageChannel->width * imageChannel->height * sizeof(int)));
+  int* deviceFilter;
+  cudaErrorCheck(cudaMalloc((void**) &deviceFilter, filterDim * filterDim * sizeof(int)));
+
+  // Copy data for original image and filter to GPU
+  cudaErrorCheck(cudaMemcpy(inImage, imageChannel->rawdata, imageChannel->width * imageChannel->height * sizeof(int), cudaMemcpyHostToDevice));
+  cudaErrorCheck(cudaMemcpy(deviceFilter, filter, filterDim * filterDim * sizeof(int), cudaMemcpyHostToDevice));
+
+  // Define dimensions for block-grid and thread-blocks
+  dim3 gridDim(imageChannel->width / BLOCK_WIDTH + 1, imageChannel->height / BLOCK_HEIGHT + 1); // Grid consists of blocks
+  dim3 blockDim(BLOCK_WIDTH, BLOCK_HEIGHT); // Block consists of threads
+
+  // Here we do the actual computation!
+  for (unsigned int i = 0; i < iterations; i++) {
+    // Thrid launch argument is the size of the array in shared memory containing the filter
+    cudaApplyFilterSharedMem<<<gridDim, blockDim, (filterDim*filterDim)>>>(outImage, inImage, imageChannel->width, imageChannel->height, deviceFilter, filterDim, filterFactor);
+    // cudaApplyFilter<<<gridDim, blockDim>>>(outImage, inImage, imageChannel->width, imageChannel->height, deviceFilter, filterDim, filterFactor);
+
+    // Swap the data pointers
+    unsigned char* tmp = inImage;
+    inImage = outImage;
+    outImage = tmp;
+  }
+
+  // Copy resulting image back to main memory
+  cudaErrorCheck(cudaMemcpy(imageChannel->rawdata, inImage, imageChannel->width * imageChannel->height * sizeof(int), cudaMemcpyDeviceToHost));
+
+  // Free the GPU-allocated memory
+  cudaErrorCheck(cudaFree(inImage));
+  cudaErrorCheck(cudaFree(outImage));
+  cudaErrorCheck(cudaFree(deviceFilter));
+}
+
+double walltime() {
+	static struct timeval t;
+	gettimeofday(&t, NULL);
+	return t.tv_sec + 1e-6 * t.tv_usec;
 }
 
 int main(int argc, char **argv) {
@@ -231,33 +357,16 @@ int main(int argc, char **argv) {
     return ERROR_EXIT;
   }
 
-  int* workingImage;
-  cudaMalloc((void**) &workingImage, imageChannel->width * imageChannel->height * sizeof(int));
-  int* prevImage;
-  cudaMalloc((void**) &prevImage, imageChannel->width * imageChannel->height * sizeof(int));
+  const int* filter = laplacian1Filter;
+  int filterDim = 3;
+  float filterFactor = laplacian1FilterFactor;
 
-  //Here we do the actual computation!
-  // imageChannel->data is a 2-dimensional array of unsigned char which is accessed row first ([y][x])
-  bmpImageChannel *processImageChannel = newBmpImageChannel(imageChannel->width, imageChannel->height);
-  for (unsigned int i = 0; i < iterations; i ++) {
-    applyFilter(processImageChannel->data,
-                imageChannel->data,
-                imageChannel->width,
-                imageChannel->height,
-                (int *)laplacian1Filter, 3, laplacian1FilterFactor
- //               (int *)laplacian2Filter, 3, laplacian2FilterFactor
- //               (int *)laplacian3Filter, 3, laplacian3FilterFactor
- //               (int *)gaussianFilter, 5, gaussianFilterFactor
-                );
-    //Swap the data pointers
-    unsigned char ** tmp = processImageChannel->data;
-    processImageChannel->data = imageChannel->data;
-    imageChannel->data = tmp;
-    unsigned char * tmp_raw = processImageChannel->rawdata;
-    processImageChannel->rawdata = imageChannel->rawdata;
-    imageChannel->rawdata = tmp_raw;
-  }
-  freeBmpImageChannel(processImageChannel);
+  double tStart = walltime();
+
+  // runSerial(imageChannel, iterations, filter, filterDim, filterFactor);
+  runCuda(imageChannel, iterations, filter, filterDim, filterFactor);
+
+  printf("Time: %.5f sec\n", walltime() - tStart);
 
   // Map our single color image back to a normal BMP image with 3 color channels
   // mapEqual puts the color value on all three channels the same way
@@ -270,7 +379,7 @@ int main(int argc, char **argv) {
   }
   freeBmpImageChannel(imageChannel);
 
-  //Write the image back to disk
+  // Write the image back to disk
   if (saveBmpImage(image, output) != 0) {
     fprintf(stderr, "Could not save output to '%s'!\n", output);
     freeBmpImage(image);
