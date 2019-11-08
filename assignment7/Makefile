@@ -5,6 +5,7 @@ ITER=10
 
 main: libs/bitmap.c libs/bitmap.c main.cu
 	nvcc libs/bitmap.c main.cu -o main
+	# Add -arch=sm_60 -rdc=true if doing task
 
 run: main
 	./main before.bmp after.bmp -i $(ITER)

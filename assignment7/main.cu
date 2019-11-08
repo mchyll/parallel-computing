@@ -39,9 +39,9 @@ int const sobelYFilter[] = {-1, -2, -1,
                              1,  2,  1};
 float const sobelYFilterFactor = (float) 1.0;
 
-int const sobelXFilter[] = {-1, -0, -1,
-                            -2,  0, -2,
-                            -1,  0, -1 , 0};
+int const sobelXFilter[] = {1, -0, -1,
+                            2,  0, -2,
+                            1,  0, -1 , 0};
 float const sobelXFilterFactor = (float) 1.0;
 
 
